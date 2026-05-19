@@ -1,0 +1,12 @@
+{
+  "name": "claude-buddy",
+  "version": "0.1.0",
+  "description": "Desktop pixel-art Claude pet",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
