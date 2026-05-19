@@ -1,12 +1,15 @@
 {
-  "name": "claude-buddy",
+  "name": "clawd",
   "version": "0.1.0",
-  "description": "Desktop pixel-art Claude pet",
+  "description": "Clawd — an 8-bit pixel crab Claude pet for your desktop",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
   },
   "devDependencies": {
     "electron": "^33.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.144"
   }
 }

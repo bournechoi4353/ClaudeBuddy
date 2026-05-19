@@ -8,16 +8,63 @@
       padding: 0;
       background: transparent;
       overflow: hidden;
-      -webkit-app-region: drag;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      user-select: none;
+      cursor: default;
     }
     canvas {
       display: block;
       image-rendering: pixelated;
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
     }
+    #chat {
+      position: absolute;
+      display: none;
+      background: #f5f0e6;
+      border: 2px solid #000;
+      box-shadow: 4px 4px 0 #000;
+      padding: 8px;
+      width: 240px;
+      font-size: 11px;
+      color: #000;
+      box-sizing: border-box;
+      z-index: 10;
+    }
+    #chat.open { display: block; }
+    #history {
+      max-height: 140px;
+      overflow-y: auto;
+      margin-bottom: 6px;
+      line-height: 1.45;
+      user-select: text;
+    }
+    #history .msg { margin-bottom: 3px; word-wrap: break-word; }
+    #history .crab { color: #8a3e1f; }
+    #history .you { color: #000; }
+    #input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #000;
+      background: #fff;
+      padding: 4px;
+      font-family: inherit;
+      font-size: 11px;
+      outline: none;
+      color: #000;
+    }
+    #input:focus { background: #fffbe6; }
   </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
+  <div id="chat">
+    <div id="history"></div>
+    <input id="input" type="text" placeholder="say something... (esc to close)" autocomplete="off" />
+  </div>
   <script src="crab.js"></script>
+  <script src="chat.js"></script>
 </body>
 </html>
