@@ -264,6 +264,21 @@ const ACCESSORY_CELLS = {
   ],
 };
 
+// Contextual animation states — additive layers on top of the behavior state
+// machine. Each is driven by a different signal (mouse, chat lifecycle, tools).
+let isHovered = false;        // cursor over the crab
+let isListening = false;       // waiting for chat reply
+let listeningStartAt = 0;
+let danceUntil = 0;            // music playing → bounce to beat
+
+function setListening(on) {
+  isListening = !!on;
+  if (on) listeningStartAt = performance.now();
+}
+function startDancing(durationMs) {
+  danceUntil = performance.now() + (durationMs || 30000);
+}
+
 // Jump reaction — main process pushes a "clawd-react" IPC when frontmost app
 // changes (and could push other events later).
 const REACT_DURATION = 700;
@@ -357,7 +372,6 @@ function draw() {
     if (t > 0 && t < 1) stretchY = -Math.sin(t * Math.PI) * 3;
   }
   const bbox = currentBbox();
-  const drawX = bbox.x;
 
   // Parabolic jump for reaction (~12px peak)
   let reactY = 0;
@@ -370,16 +384,61 @@ function draw() {
     }
   }
 
-  const drawY = bbox.y + bob + Math.round(reactY + stretchY);
+  // Contextual offsets (additive on top of behavior-state + react animation).
+  const tNow = performance.now();
+  let hoverY = 0, swayX = 0, danceY = 0;
+  if (isHovered) hoverY = -2;
+  if (isListening) {
+    const tSec = (tNow - listeningStartAt) / 1000;
+    swayX = Math.sin(tSec * 3) * 1.5;
+  }
+  if (tNow < danceUntil) {
+    danceY = Math.sin(tNow / 1000 * 2 * Math.PI * 2) * 2.5; // 2 Hz bounce
+  }
+
+  const drawX = bbox.x + Math.round(swayX);
+  const drawY = bbox.y + bob + Math.round(reactY + stretchY + hoverY + danceY);
   const frame = moving ? walkFrame : 0;
   // Force eyes closed while sleeping (overrides blink scheduler).
   const eyesShown = !(eyesClosed || isSleeping);
+
+  // Eye-tracking offsets — when hovered, eyes lean toward the cursor.
+  let eyeOffX = 0, eyeOffY = 0;
+  if (eyesShown && isHovered && lastMouseX >= 0 && SCALE >= 5) {
+    const crabCenterX = drawX + crabW / 2;
+    const crabCenterY = drawY + crabH / 2;
+    const dx = lastMouseX - crabCenterX;
+    const dy = lastMouseY - crabCenterY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1) {
+      const maxOff = Math.max(1, Math.floor(SCALE / 3));
+      eyeOffX = Math.round((dx / dist) * maxOff);
+      eyeOffY = Math.round((dy / dist) * maxOff);
+    }
+  }
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const ch = CRAB[r][c];
       if (ch === '.') continue;
       if (legRaised(r, c, frame)) continue;
+
+      // Eyes with cursor tracking: paint body color across the cell, then a
+      // smaller pupil shifted toward the cursor inside it.
+      if (ch === 'X' && eyesShown && (eyeOffX !== 0 || eyeOffY !== 0)) {
+        ctx.fillStyle = COLORS.O;
+        ctx.fillRect(drawX + c * SCALE, drawY + r * SCALE, SCALE, SCALE);
+        const pupil = Math.max(2, SCALE - 2);
+        const inset = Math.floor((SCALE - pupil) / 2);
+        ctx.fillStyle = COLORS.X;
+        ctx.fillRect(
+          drawX + c * SCALE + inset + eyeOffX,
+          drawY + r * SCALE + inset + eyeOffY,
+          pupil,
+          pupil
+        );
+        continue;
+      }
 
       let color = COLORS[ch];
       if (!eyesShown && ch === 'X') color = COLORS.O;
@@ -539,6 +598,7 @@ function isOverCrab(x, y) {
 function refreshMouseRegion() {
   if (lastMouseX < 0) return;
   const overCrab = isOverCrab(lastMouseX, lastMouseY);
+  isHovered = overCrab;
   const overChat = window.Chat && window.Chat.isOpen() && window.Chat.containsPoint(lastMouseX, lastMouseY);
   const shouldCapture = overCrab || overChat;
 
@@ -563,6 +623,7 @@ document.addEventListener('mousedown', (e) => {
     return;
   }
   if (isOverCrab(e.clientX, e.clientY)) {
+    triggerReact(); // small visible hop on click
     window.Chat.open(currentBbox());
   }
 });
@@ -582,6 +643,8 @@ window.Crab = {
   isSleeping: () => isSleeping,
   handleToolUse,
   clearAccessory,
+  setListening,
+  dance: startDancing,
 };
 
 tick();

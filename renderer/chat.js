@@ -16,6 +16,13 @@ let inFlight = false;
 window.crabAPI.onChatPiece((piece) => {
   if (piece.type === 'tool') {
     if (window.Crab && window.Crab.handleToolUse) window.Crab.handleToolUse(piece.name);
+    // Spotify play tools → start dance mode for 30s.
+    if (
+      piece.name && /spotify_play(_uri)?$/.test(piece.name) &&
+      window.Crab && window.Crab.dance
+    ) {
+      window.Crab.dance(30000);
+    }
     return;
   }
   if (piece.type === 'chunk') {
@@ -33,6 +40,7 @@ window.crabAPI.onChatPiece((piece) => {
   } else if (piece.type === 'done') {
     currentReplyEl = null;
     inFlight = false;
+    if (window.Crab && window.Crab.setListening) window.Crab.setListening(false);
     if (window.Crab && window.Crab.clearAccessory) window.Crab.clearAccessory();
   }
 });
@@ -91,6 +99,7 @@ inputEl.addEventListener('keydown', (e) => {
     inputEl.value = '';
     inFlight = true;
     window.Crab.noteInteraction && window.Crab.noteInteraction();
+    window.Crab.setListening && window.Crab.setListening(true);
     window.crabAPI.sendChatMessage(text);
   } else if (e.key === 'Escape') {
     close();
