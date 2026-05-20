@@ -38,7 +38,6 @@ for (const k of Object.keys(process.env)) {
 const agent = require('./agent');
 const spotifyAuth = require('./spotify-auth');
 const { dialog, shell } = require('electron');
-const fs = require('fs');
 const os = require('os');
 
 function maybeShowClaudeOnboarding() {
@@ -287,6 +286,7 @@ function watchDisplayChanges() {
 
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
+  maybeShowClaudeOnboarding();
   createMainWindow(screen.getPrimaryDisplay());
   createTray();
   watchDisplayChanges();
