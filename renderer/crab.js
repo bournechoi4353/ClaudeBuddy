@@ -21,15 +21,33 @@ const COLORS = {
   X: '#000000',
 };
 
-const SCALE = 6;
+// Initial scale read from URL params at load time so we don't render at the
+// default and then jump when the IPC arrives.
+const _initParams = new URLSearchParams(window.location.search);
+let SCALE = parseInt(_initParams.get('scale') || '6', 10) || 6;
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
 
 const cols = CRAB[0].length;
 const rows = CRAB.length;
-const crabW = cols * SCALE;
-const crabH = rows * SCALE;
+let crabW = cols * SCALE;
+let crabH = rows * SCALE;
+
+function applyScale(newScale) {
+  if (typeof newScale !== 'number' || newScale < 1) return;
+  SCALE = newScale;
+  crabW = cols * SCALE;
+  crabH = rows * SCALE;
+  if (posX + crabW > canvas.width) posX = Math.max(0, canvas.width - crabW);
+  if (posX < 0) posX = 0;
+}
+
+if (window.crabAPI && window.crabAPI.onSetScale) {
+  window.crabAPI.onSetScale((info) => {
+    if (info) applyScale(info.scale);
+  });
+}
 
 let posX = 0;
 let dir = 1;

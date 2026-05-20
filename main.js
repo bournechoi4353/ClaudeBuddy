@@ -1,6 +1,30 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
+
+// Tiny prefs file so user choices survive relaunches.
+const PREFS_PATH = path.join(app.getPath('userData'), 'prefs.json');
+function loadPrefs() {
+  try { return JSON.parse(fs.readFileSync(PREFS_PATH, 'utf8')); } catch { return {}; }
+}
+function savePrefs(p) {
+  try {
+    fs.mkdirSync(path.dirname(PREFS_PATH), { recursive: true });
+    fs.writeFileSync(PREFS_PATH, JSON.stringify(p));
+  } catch (_) {}
+}
+const SIZES = [
+  { label: 'Small',  scale: 4 },
+  { label: 'Medium', scale: 6 },
+  { label: 'Large',  scale: 9 },
+  { label: 'Huge',   scale: 14 },
+];
+const DEFAULT_SCALE = 6;
+let prefs = loadPrefs();
+function currentScale() {
+  return typeof prefs.scale === 'number' ? prefs.scale : DEFAULT_SCALE;
+}
 
 // Force subscription auth: ignore any inherited API key so credits come from Claude Pro/Max.
 delete process.env.ANTHROPIC_API_KEY;
@@ -40,7 +64,9 @@ function createMainWindow(display) {
   mainWin.setAlwaysOnTop(true, 'screen-saver');
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setIgnoreMouseEvents(true, { forward: true });
-  mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
+    search: `scale=${currentScale()}`,
+  });
 
   startAppSwitchWatcher(mainWin);
 }
@@ -125,11 +151,31 @@ function buildMonitorSubmenu() {
   });
 }
 
+function buildSizeSubmenu() {
+  const cur = currentScale();
+  return SIZES.map(({ label, scale }) => ({
+    label,
+    type: 'radio',
+    checked: scale === cur,
+    click: () => setScale(scale),
+  }));
+}
+
+function setScale(scale) {
+  prefs.scale = scale;
+  savePrefs(prefs);
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send('clawd-set-scale', { scale });
+  }
+  rebuildTrayMenu();
+}
+
 function rebuildTrayMenu() {
   const launchAtLogin = app.getLoginItemSettings().openAtLogin;
   const monitorItems = buildMonitorSubmenu();
   const menu = Menu.buildFromTemplate([
     { label: 'Reset conversation', click: () => agent.reset() },
+    { label: 'Size', submenu: buildSizeSubmenu() },
     {
       label: 'Move to monitor',
       submenu: monitorItems,

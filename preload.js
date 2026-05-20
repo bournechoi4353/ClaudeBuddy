@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onReact: (callback) => {
     ipcRenderer.on('clawd-react', (_e, payload) => callback(payload));
   },
+  onSetScale: (callback) => {
+    ipcRenderer.on('clawd-set-scale', (_e, info) => callback(info));
+  },
   resetChat: () => ipcRenderer.send('chat-reset'),
 });
