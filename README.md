@@ -10,7 +10,7 @@ Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no
 
 - **macOS on Apple Silicon (M1 / M2 / M3 / M4).** Intel Macs need a fresh build (see below). Windows / Linux not supported.
 - **A Claude Pro or Max subscription.** Free Claude.ai accounts can't drive the Agent SDK.
-- **Claude Code CLI**, logged in to that subscription. Install instructions: <https://docs.claude.com/en/docs/claude-code/quickstart>. After installing, run `claude login` once and choose your subscription account.
+- **Claude Code CLI**, LOGGED IN TO THAT SUBSCRIPTION. Install instructions: <https://docs.claude.com/en/docs/claude-code/quickstart>. After installing, run `claude login` once and choose your subscription account.
 - **Node.js 20 or newer** (`node --version` should report v20.x or higher).
 - **Spotify desktop app** — optional, only needed if you want Clawd to control music.
 
