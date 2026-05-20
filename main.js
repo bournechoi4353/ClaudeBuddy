@@ -37,8 +37,16 @@ for (const k of Object.keys(process.env)) {
 
 const agent = require('./agent');
 const spotifyAuth = require('./spotify-auth');
+const tools = require('./tools');
 const { dialog, shell } = require('electron');
 const os = require('os');
+
+// When a timer ends, the renderer hops Clawd + shows a thought bubble.
+tools.setTimerEndCallback(({ id, label }) => {
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send('clawd-timer-ended', { id, label });
+  }
+});
 
 function maybeShowClaudeOnboarding() {
   const credsPath = path.join(os.homedir(), '.claude', '.credentials.json');

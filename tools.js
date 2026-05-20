@@ -468,6 +468,172 @@ open location "spotify:search:${q}"`);
   }
 }
 
+// ---- Calendar (macOS Calendar.app via AppleScript) ----
+
+async function calendarHandler({ days }) {
+  const dayCount = Math.max(1, Math.min(7, days || 1));
+  const script = `set output to ""
+tell application "Calendar"
+set startDate to current date
+set endDate to startDate + (${dayCount} * 24 * 60 * 60)
+repeat with cal in calendars
+try
+set evs to (every event of cal whose start date is greater than or equal to startDate and start date is less than or equal to endDate)
+repeat with ev in evs
+set output to output & (summary of ev as text) & " | " & ((start date of ev) as text) & " | " & (name of cal) & linefeed
+end repeat
+end try
+end repeat
+end tell
+return output`;
+  try {
+    const out = await osascriptRun(script);
+    if (!out.trim()) {
+      return { content: [{ type: 'text', text: `no calendar events in the next ${dayCount} day(s)` }] };
+    }
+    return { content: [{ type: 'text', text: out }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'calendar error: ' + err.message + ' (Clawd may need Calendar permission)' }], isError: true };
+  }
+}
+
+// ---- Weather (Open-Meteo + ipapi.co — no API keys) ----
+
+const WEATHER_CODES = {
+  0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'overcast',
+  45: 'foggy', 48: 'foggy',
+  51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle',
+  61: 'light rain', 63: 'rain', 65: 'heavy rain',
+  71: 'light snow', 73: 'snow', 75: 'heavy snow',
+  77: 'snow grains',
+  80: 'light showers', 81: 'showers', 82: 'heavy showers',
+  85: 'light snow showers', 86: 'snow showers',
+  95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'thunderstorm with hail',
+};
+
+async function weatherHandler() {
+  try {
+    const locRes = await fetch('https://ipapi.co/json/', { headers: { 'User-Agent': 'Clawd/0.1' } });
+    if (!locRes.ok) throw new Error(`location lookup ${locRes.status}`);
+    const loc = await locRes.json();
+    const { latitude, longitude, city } = loc;
+    if (latitude == null || longitude == null) throw new Error('no location returned');
+
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,wind_speed_10m&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+    const wRes = await fetch(weatherUrl);
+    if (!wRes.ok) throw new Error(`weather ${wRes.status}`);
+    const data = await wRes.json();
+    const c = data.current || {};
+    const desc = WEATHER_CODES[c.weather_code] || 'unknown';
+    const text = `${city || 'your area'}: ${Math.round(c.temperature_2m)}°F, ${desc}, wind ${Math.round(c.wind_speed_10m)} mph`;
+    return { content: [{ type: 'text', text }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'weather error: ' + (err.message || err) }], isError: true };
+  }
+}
+
+// ---- Notes (macOS Notes.app via AppleScript) ----
+
+async function getNotesHandler({ limit }) {
+  const n = Math.max(1, Math.min(20, limit || 5));
+  const script = `set output to ""
+tell application "Notes"
+set theNotes to notes
+set countNotes to count of theNotes
+set maxN to ${n}
+if countNotes < maxN then set maxN to countNotes
+repeat with i from 1 to maxN
+set theNote to item i of theNotes
+set output to output & "---" & linefeed & (name of theNote) & linefeed & (plaintext of theNote) & linefeed
+end repeat
+end tell
+return output`;
+  try {
+    const out = await osascriptRun(script);
+    return { content: [{ type: 'text', text: out || 'no notes found' }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'notes error: ' + err.message + ' (Clawd may need Notes permission)' }], isError: true };
+  }
+}
+
+async function saveNoteHandler({ title, body }) {
+  if (!title || !body) {
+    return { content: [{ type: 'text', text: 'need both title and body' }], isError: true };
+  }
+  const safeTitle = title.replace(/"/g, '\\"');
+  const safeBody = body.replace(/"/g, '\\"').replace(/\n/g, '<br>');
+  const script = `tell application "Notes"
+make new note with properties {name:"${safeTitle}", body:"<h1>${safeTitle}</h1>${safeBody}"}
+end tell`;
+  try {
+    await osascriptRun(script);
+    return { content: [{ type: 'text', text: `saved note: "${title}"` }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'note save error: ' + err.message }], isError: true };
+  }
+}
+
+// ---- Timers (in-memory; main process holds the setTimeout) ----
+
+const activeTimers = new Map(); // id -> { endsAt, label }
+let timerIdCounter = 0;
+let onTimerEnd = null; // set from main.js so we can send IPC
+
+function setTimerEndCallback(cb) {
+  onTimerEnd = cb;
+}
+
+async function startTimerHandler({ minutes, label }) {
+  const m = Number(minutes);
+  if (!Number.isFinite(m) || m <= 0 || m > 600) {
+    return { content: [{ type: 'text', text: 'minutes must be between 0 and 600' }], isError: true };
+  }
+  const id = ++timerIdCounter;
+  const ms = m * 60_000;
+  const endsAt = Date.now() + ms;
+  const labelStr = (label || `${m} minute`).toString();
+  const handle = setTimeout(() => {
+    activeTimers.delete(id);
+    if (onTimerEnd) {
+      try { onTimerEnd({ id, label: labelStr }); } catch (_) {}
+    }
+  }, ms);
+  activeTimers.set(id, { endsAt, label: labelStr, handle });
+  return { content: [{ type: 'text', text: `timer set for ${m} min ("${labelStr}"). i will hop when it's done.` }] };
+}
+
+async function listTimersHandler() {
+  if (activeTimers.size === 0) {
+    return { content: [{ type: 'text', text: 'no active timers' }] };
+  }
+  const now = Date.now();
+  const lines = [];
+  for (const [id, t] of activeTimers) {
+    const remainSec = Math.max(0, Math.round((t.endsAt - now) / 1000));
+    const mm = Math.floor(remainSec / 60);
+    const ss = String(remainSec % 60).padStart(2, '0');
+    lines.push(`#${id}: ${t.label} — ${mm}:${ss} remaining`);
+  }
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+async function cancelTimerHandler({ id }) {
+  const target = id ? activeTimers.get(Number(id)) : null;
+  if (!target && activeTimers.size === 1) {
+    // No id given but there's exactly one — cancel it.
+    const [onlyId, only] = activeTimers.entries().next().value;
+    clearTimeout(only.handle);
+    activeTimers.delete(onlyId);
+    return { content: [{ type: 'text', text: `cancelled timer "${only.label}"` }] };
+  }
+  if (!target) {
+    return { content: [{ type: 'text', text: 'no matching timer to cancel' }], isError: true };
+  }
+  clearTimeout(target.handle);
+  activeTimers.delete(Number(id));
+  return { content: [{ type: 'text', text: `cancelled timer "${target.label}"` }] };
+}
+
 async function frontmostHandler() {
   try {
     const script = `tell application "System Events"
@@ -565,12 +731,61 @@ async function buildServer(sdk) {
         { query: z.string().describe('a song, artist, or album name to search for') },
         spotifySearchHandler
       ),
+      tool(
+        'calendar_events',
+        'Returns upcoming events from the user\'s macOS Calendar. Use for "what\'s my next meeting", "what\'s on my calendar today", "any events this week".',
+        { days: z.number().optional().describe('how many days ahead to look (1-7, default 1)') },
+        calendarHandler
+      ),
+      tool(
+        'weather',
+        'Current weather at the user\'s location. Uses IP-based geolocation. Use for "do i need a jacket", "is it raining", "how hot is it outside".',
+        {},
+        weatherHandler
+      ),
+      tool(
+        'get_notes',
+        'Reads the most recent notes from macOS Notes.app. Returns title + body of each. Use when the user asks "what did I write down", "read my notes", "what was my last note".',
+        { limit: z.number().optional().describe('how many recent notes to return (1-20, default 5)') },
+        getNotesHandler
+      ),
+      tool(
+        'save_note',
+        'Creates a new note in macOS Notes.app with the given title and body. Use when the user says "save this", "remember this", "make a note that...".',
+        {
+          title: z.string().describe('short note title'),
+          body: z.string().describe('note contents'),
+        },
+        saveNoteHandler
+      ),
+      tool(
+        'start_timer',
+        'Starts a countdown timer. When it ends, Clawd visibly reacts (hops, shows a thought bubble). Use for "set a 25 minute timer", "pomodoro", "remind me in 10 minutes".',
+        {
+          minutes: z.number().describe('timer duration in minutes (must be > 0, max 600)'),
+          label: z.string().optional().describe('what the timer is for, e.g. "focus" or "tea"'),
+        },
+        startTimerHandler
+      ),
+      tool(
+        'list_timers',
+        'Lists currently running timers with their remaining time. Use for "what timers do I have", "how long left".',
+        {},
+        listTimersHandler
+      ),
+      tool(
+        'cancel_timer',
+        'Cancels a running timer by its ID. If only one timer is active, omitting id cancels it.',
+        { id: z.number().optional().describe('timer id from list_timers; omit if only one is running') },
+        cancelTimerHandler
+      ),
     ],
   });
 }
 
 module.exports = {
   buildServer,
+  setTimerEndCallback,
   allowedTools: [
     'mcp__clawd__now',
     'mcp__clawd__frontmost_window',
@@ -583,5 +798,12 @@ module.exports = {
     'mcp__clawd__spotify_play_uri',
     'mcp__clawd__spotify_play',
     'mcp__clawd__spotify_search',
+    'mcp__clawd__calendar_events',
+    'mcp__clawd__weather',
+    'mcp__clawd__get_notes',
+    'mcp__clawd__save_note',
+    'mcp__clawd__start_timer',
+    'mcp__clawd__list_timers',
+    'mcp__clawd__cancel_timer',
   ],
 };

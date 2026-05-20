@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onSetScale: (callback) => {
     ipcRenderer.on('clawd-set-scale', (_e, info) => callback(info));
   },
+  onTimerEnded: (callback) => {
+    ipcRenderer.on('clawd-timer-ended', (_e, info) => callback(info));
+  },
   resetChat: () => ipcRenderer.send('chat-reset'),
 });

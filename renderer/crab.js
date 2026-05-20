@@ -256,6 +256,57 @@ if (window.crabAPI && window.crabAPI.onReact) {
   window.crabAPI.onReact(() => triggerReact());
 }
 
+// Thought bubbles — drawn above the crab. Used for both idle "thinking"
+// thoughts AND timer-end alerts (label shows in the bubble, body hops too).
+let activeThought = null; // { text, startedAt, duration }
+
+function showThought(text, durationMs) {
+  activeThought = { text, startedAt: performance.now(), duration: durationMs || 4500 };
+}
+
+// Idle thought timing — random interval between 6 and 16 minutes when Clawd
+// is awake and nobody is chatting with him. Pulls from a small hand-written
+// pool so we don't burn API credits on flavor text.
+const IDLE_THOUGHTS = [
+  '...crab thoughts.',
+  'i wonder what clouds taste like.',
+  'sand. miss the sand sometimes.',
+  'is the dock breakable.',
+  'maybe a tiny nap. just a tiny one.',
+  'left or right. left or right. left.',
+  'why is the cursor so fast.',
+  'you should drink water btw.',
+  '...zzz. wait. not yet.',
+  'i am claude. but a crab.',
+  'one day i will walk up the side.',
+  'kinda hungry. for what though.',
+  'good music day.',
+  'somewhere a wave is breaking.',
+];
+let nextThoughtAt = performance.now() + 6 * 60_000 + Math.random() * 10 * 60_000;
+
+function maybeShowIdleThought(now) {
+  if (now < nextThoughtAt) return;
+  if (isSleeping || externallyPaused || activeThought) {
+    nextThoughtAt = now + 60_000; // try again in a minute
+    return;
+  }
+  const text = IDLE_THOUGHTS[Math.floor(Math.random() * IDLE_THOUGHTS.length)];
+  showThought(text, 4500);
+  nextThoughtAt = now + 6 * 60_000 + Math.random() * 10 * 60_000;
+}
+
+// Timer-end alert from main process: hop, show the label as a bubble, count
+// as an interaction (wakes Clawd if he was sleeping).
+if (window.crabAPI && window.crabAPI.onTimerEnded) {
+  window.crabAPI.onTimerEnded((info) => {
+    noteInteraction();
+    triggerReact();
+    const label = info && info.label ? info.label : 'timer';
+    showThought(`ding! ${label} done`, 7000);
+  });
+}
+
 function legRaised(r, c, frame) {
   if (r !== rows - 1) return false;
   const isOuter = (c === 2 || c === 9);
@@ -347,6 +398,51 @@ function draw() {
 
   // Z's float on top of everything (drawn last so they're visible even over the body).
   drawZParticles();
+
+  // Thought bubble — above the crab, monochrome pixel-art-ish.
+  if (activeThought) {
+    const age = performance.now() - activeThought.startedAt;
+    if (age >= activeThought.duration) {
+      activeThought = null;
+    } else {
+      const bbox = currentBbox();
+      const fontSize = Math.max(10, SCALE + 4);
+      ctx.font = `${fontSize}px ui-monospace, Menlo, monospace`;
+      const padding = 6;
+      const text = activeThought.text;
+      const metrics = ctx.measureText(text);
+      const w = Math.ceil(metrics.width) + padding * 2;
+      const h = Math.ceil(fontSize) + padding * 2;
+      let bubbleX = bbox.x + bbox.w / 2 - w / 2;
+      const bubbleY = bbox.y - h - 8;
+      // Keep within canvas horizontally.
+      if (bubbleX < 4) bubbleX = 4;
+      if (bubbleX + w > canvas.width - 4) bubbleX = canvas.width - w - 4;
+      // Fade in/out
+      const t = age / activeThought.duration;
+      let alpha = 1;
+      if (t < 0.1) alpha = t / 0.1;
+      else if (t > 0.85) alpha = (1 - t) / 0.15;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#f5f0e6';
+      ctx.fillRect(bubbleX, bubbleY, w, h);
+      ctx.fillStyle = '#000';
+      // 1px black border
+      ctx.fillRect(bubbleX, bubbleY, w, 1);
+      ctx.fillRect(bubbleX, bubbleY + h - 1, w, 1);
+      ctx.fillRect(bubbleX, bubbleY, 1, h);
+      ctx.fillRect(bubbleX + w - 1, bubbleY, 1, h);
+      // Tail (a small triangle of pixels pointing down at the crab)
+      ctx.fillRect(bubbleX + w / 2 - 2, bubbleY + h, 4, 1);
+      ctx.fillRect(bubbleX + w / 2 - 1, bubbleY + h + 1, 2, 1);
+      // Text
+      ctx.fillStyle = '#000';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.fillText(text, bubbleX + padding, bubbleY + h / 2);
+      ctx.globalAlpha = 1;
+    }
+  }
 }
 
 let lastTickAt = performance.now();
@@ -363,6 +459,9 @@ function tick() {
   // Sleep visuals.
   spawnZIfSleeping(now);
   updateZParticles(dtMs);
+
+  // Idle thoughts.
+  maybeShowIdleThought(now);
 
   if (!externallyPaused && !isSleeping) {
     if (now >= stateUntil) pickNextBehavior();
