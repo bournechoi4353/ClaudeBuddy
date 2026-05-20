@@ -1,5 +1,6 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
+const { spawn } = require('child_process');
 
 // Force subscription auth: ignore any inherited API key so credits come from Claude Pro/Max.
 delete process.env.ANTHROPIC_API_KEY;
@@ -12,82 +13,90 @@ for (const k of Object.keys(process.env)) {
 
 const agent = require('./agent');
 
-function createWindow() {
-  // Span ALL connected displays so Clawd can walk across monitors.
-  // We take the bounding box of every display's workArea (excludes menubar + dock
-  // per display). Gaps between non-tiled monitors become dead zones — fine for
-  // typical horizontal arrangements.
-  const displays = screen.getAllDisplays();
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const d of displays) {
-    const wa = d.workArea;
-    minX = Math.min(minX, wa.x);
-    minY = Math.min(minY, wa.y);
-    maxX = Math.max(maxX, wa.x + wa.width);
-    maxY = Math.max(maxY, wa.y + wa.height);
-  }
-  const wx = minX, wy = minY, ww = maxX - minX, wh = maxY - minY;
+// One BrowserWindow per display, each sized to that monitor's workArea.
+// macOS reliably renders single-monitor windows; a window spanning displays
+// is often invisibly clipped to one of them.
+const allWindows = []; // [{ win, display, idx }]
+let activeMonitorIdx = 0;
 
-  // Per-monitor segments in window coords. Each segment has its own X range
-  // and bottomY so Clawd stays on each monitor's visible area, even when
-  // monitors are at different vertical offsets or have gaps between them.
-  const segments = displays
-    .map((d) => ({
-      leftX: d.workArea.x - wx,
-      rightX: d.workArea.x + d.workArea.width - wx,
-      bottomY: d.workArea.y + d.workArea.height - wy,
-    }))
-    .sort((a, b) => a.leftX - b.leftX);
+function createAllWindows() {
+  const displays = screen.getAllDisplays().sort((a, b) => a.bounds.x - b.bounds.x);
+  const total = displays.length;
 
-  const win = new BrowserWindow({
-    width: ww,
-    height: wh,
-    x: wx,
-    y: wy,
-    transparent: true,
-    frame: false,
-    alwaysOnTop: true,
-    hasShadow: false,
-    resizable: false,
-    skipTaskbar: true,
-    webPreferences: {
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
+  displays.forEach((display, idx) => {
+    const wa = display.workArea;
+    const win = new BrowserWindow({
+      x: wa.x,
+      y: wa.y,
+      width: wa.width,
+      height: wa.height,
+      transparent: true,
+      frame: false,
+      alwaysOnTop: true,
+      hasShadow: false,
+      resizable: false,
+      skipTaskbar: true,
+      webPreferences: {
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    });
+
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setIgnoreMouseEvents(true, { forward: true });
+
+    win.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
+      search: `monitor=${idx}&total=${total}`,
+    });
+
+    allWindows.push({ win, display, idx });
   });
-
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.setIgnoreMouseEvents(true, { forward: true });
-
-  ipcMain.on('set-ignore-mouse', (_event, ignore) => {
-    win.setIgnoreMouseEvents(ignore, { forward: true });
-  });
-
-  ipcMain.on('chat-send', async (event, text) => {
-    try {
-      for await (const piece of agent.chat(text)) {
-        if (event.sender.isDestroyed()) break;
-        event.sender.send('chat-piece', piece);
-      }
-    } catch (err) {
-      if (!event.sender.isDestroyed()) {
-        event.sender.send('chat-piece', { type: 'error', error: err.message || String(err) });
-        event.sender.send('chat-piece', { type: 'done' });
-      }
-    }
-  });
-
-  ipcMain.on('chat-reset', () => agent.reset());
-
-  ipcMain.handle('clawd:get-layout', () => ({ segments }));
-
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-
-  startAppSwitchWatcher(win);
 }
 
-const { spawn } = require('child_process');
+function senderWindow(event) {
+  const w = BrowserWindow.fromWebContents(event.sender);
+  return allWindows.find((it) => it.win === w);
+}
+
+ipcMain.on('set-ignore-mouse', (event, ignore) => {
+  const item = senderWindow(event);
+  if (item) item.win.setIgnoreMouseEvents(ignore, { forward: true });
+});
+
+ipcMain.on('chat-send', async (event, text) => {
+  try {
+    for await (const piece of agent.chat(text)) {
+      if (event.sender.isDestroyed()) break;
+      event.sender.send('chat-piece', piece);
+    }
+  } catch (err) {
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('chat-piece', { type: 'error', error: err.message || String(err) });
+      event.sender.send('chat-piece', { type: 'done' });
+    }
+  }
+});
+
+ipcMain.on('chat-reset', () => agent.reset());
+
+// Hand Clawd off from one window to the adjacent one (by display X order).
+ipcMain.handle('clawd:cross-monitor', (event, payload) => {
+  const sender = senderWindow(event);
+  if (!sender) return { crossed: false };
+  const direction = payload && payload.direction;
+  const targetIdx = direction === 'right' ? sender.idx + 1 : sender.idx - 1;
+  if (targetIdx < 0 || targetIdx >= allWindows.length) return { crossed: false };
+
+  activeMonitorIdx = targetIdx;
+  sender.win.webContents.send('clawd-set-active', { active: false });
+  allWindows[targetIdx].win.webContents.send('clawd-set-active', {
+    active: true,
+    edge: direction === 'right' ? 'left' : 'right',
+  });
+  return { crossed: true };
+});
+
 function osascriptOnce(script) {
   return new Promise((resolve, reject) => {
     const p = spawn('osascript', ['-e', script]);
@@ -98,15 +107,18 @@ function osascriptOnce(script) {
   });
 }
 
-function startAppSwitchWatcher(win) {
+function startAppSwitchWatcher() {
   let lastFront = null;
   const tick = async () => {
     try {
       const front = await osascriptOnce(
         'tell application "System Events" to return name of first application process whose frontmost is true'
       );
-      if (lastFront !== null && front && front !== lastFront && !win.isDestroyed()) {
-        win.webContents.send('clawd-react', { type: 'app-switch', app: front });
+      if (lastFront !== null && front && front !== lastFront) {
+        const active = allWindows[activeMonitorIdx];
+        if (active && !active.win.isDestroyed()) {
+          active.win.webContents.send('clawd-react', { type: 'app-switch', app: front });
+        }
       }
       lastFront = front;
     } catch (_) {
@@ -145,7 +157,8 @@ function createTray() {
 
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
-  createWindow();
+  createAllWindows();
+  startAppSwitchWatcher();
   createTray();
 });
 
