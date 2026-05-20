@@ -1,0 +1,43 @@
+(async function init() {
+  const prefs = (await window.crabAPI.getPrefs()) || {};
+
+  const $ = (id) => document.getElementById(id);
+  const petName = $('petName');
+  const personality = $('personality');
+  const speed = $('speed');
+  const speedVal = $('speedVal');
+  const color = $('color');
+  const colorVal = $('colorVal');
+  const sleepMin = $('sleepMin');
+  const sleepMinVal = $('sleepMinVal');
+
+  petName.value = prefs.petName || 'clawd';
+  personality.value = prefs.personality || 'default';
+  speed.value = prefs.crabSpeed != null ? prefs.crabSpeed : 0.5;
+  speedVal.textContent = parseFloat(speed.value).toFixed(1);
+  color.value = prefs.crabColor || '#CC785C';
+  colorVal.textContent = color.value.toUpperCase();
+  sleepMin.value = prefs.sleepMinutes != null ? prefs.sleepMinutes : 3;
+  sleepMinVal.textContent = sleepMin.value;
+
+  // Live save on each input change.
+  petName.addEventListener('input', () => {
+    const v = petName.value.trim().toLowerCase() || 'clawd';
+    window.crabAPI.setPref({ petName: v });
+  });
+  personality.addEventListener('change', () => {
+    window.crabAPI.setPref({ personality: personality.value });
+  });
+  speed.addEventListener('input', () => {
+    speedVal.textContent = parseFloat(speed.value).toFixed(1);
+    window.crabAPI.setPref({ crabSpeed: parseFloat(speed.value) });
+  });
+  color.addEventListener('input', () => {
+    colorVal.textContent = color.value.toUpperCase();
+    window.crabAPI.setPref({ crabColor: color.value });
+  });
+  sleepMin.addEventListener('input', () => {
+    sleepMinVal.textContent = sleepMin.value;
+    window.crabAPI.setPref({ sleepMinutes: parseInt(sleepMin.value, 10) });
+  });
+})();

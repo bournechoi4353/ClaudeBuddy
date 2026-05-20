@@ -17,7 +17,7 @@ const CRAB = [
 ];
 
 const COLORS = {
-  O: '#CC785C',
+  O: '#CC785C', // live-updated from prefs window
   X: '#000000',
 };
 
@@ -49,9 +49,27 @@ if (window.crabAPI && window.crabAPI.onSetScale) {
   });
 }
 
+// Live preference application — pulled at startup, also pushed when the user
+// edits the Preferences window. Only visual prefs are applied here; personality
+// + pet name take effect on the next chat (agent.js rebuilds the system prompt).
+function applyPrefs(p) {
+  if (!p) return;
+  if (typeof p.crabSpeed === 'number' && p.crabSpeed > 0) SPEED = p.crabSpeed;
+  if (typeof p.crabColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(p.crabColor)) COLORS.O = p.crabColor;
+  if (typeof p.sleepMinutes === 'number' && p.sleepMinutes > 0) {
+    SLEEP_AFTER_MS = p.sleepMinutes * 60 * 1000;
+  }
+}
+if (window.crabAPI && window.crabAPI.getPrefs) {
+  window.crabAPI.getPrefs().then(applyPrefs).catch(() => {});
+}
+if (window.crabAPI && window.crabAPI.onPrefsUpdated) {
+  window.crabAPI.onPrefsUpdated(applyPrefs);
+}
+
 let posX = 0;
 let dir = 1;
-const SPEED = 0.5;
+let SPEED = 0.5; // live-updated from prefs window
 let externallyPaused = false; // chat open
 
 function fitCanvas() {
@@ -139,7 +157,8 @@ function scheduleBlink(t) {
 scheduleBlink(performance.now());
 
 // Sleep — after N ms of no chat interaction, Clawd dozes off.
-const SLEEP_AFTER_MS = 3 * 60 * 1000;
+// Backed by prefs.sleepMinutes; live-updated from the Preferences window.
+let SLEEP_AFTER_MS = 3 * 60 * 1000;
 let lastInteractionAt = performance.now();
 let isSleeping = false;
 function noteInteraction() {

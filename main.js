@@ -139,6 +139,43 @@ ipcMain.on('chat-send', async (event, text) => {
 
 ipcMain.on('chat-reset', () => agent.reset());
 
+// Preferences window IPC.
+ipcMain.handle('prefs:get', () => ({ ...prefs }));
+ipcMain.on('prefs:set', (_e, updates) => {
+  Object.assign(prefs, updates || {});
+  savePrefs(prefs);
+  // Broadcast live updates to the main crab window so visual prefs
+  // (speed, color, sleep threshold) apply immediately.
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send('prefs-updated', updates || {});
+  }
+});
+
+let prefsWin = null;
+function openPreferencesWindow() {
+  if (prefsWin && !prefsWin.isDestroyed()) {
+    prefsWin.focus();
+    return;
+  }
+  prefsWin = new BrowserWindow({
+    width: 400,
+    height: 540,
+    title: 'Clawd Preferences',
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    backgroundColor: '#f5f0e6',
+    webPreferences: {
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+  prefsWin.setMenu(null);
+  prefsWin.loadFile(path.join(__dirname, 'renderer', 'preferences.html'));
+  prefsWin.on('closed', () => { prefsWin = null; });
+}
+
 function osascriptOnce(script) {
   return new Promise((resolve, reject) => {
     const p = spawn('osascript', ['-e', script]);
@@ -244,6 +281,8 @@ function rebuildTrayMenu() {
   const monitorItems = buildMonitorSubmenu();
   const spotifyConnected = !!prefs.spotifyRefreshToken;
   const menu = Menu.buildFromTemplate([
+    { label: 'Preferences…', click: openPreferencesWindow },
+    { type: 'separator' },
     { label: 'Reset conversation', click: () => agent.reset() },
     { label: 'Size', submenu: buildSizeSubmenu() },
     {

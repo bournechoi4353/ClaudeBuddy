@@ -4,6 +4,26 @@
 const path = require('path');
 const fs = require('fs');
 const tools = require('./tools');
+const { app: electronApp } = require('electron');
+
+// Read prefs at chat-time so changes from the Preferences window take effect
+// without a restart.
+function readPrefsForPrompt() {
+  try {
+    const p = path.join(electronApp.getPath('userData'), 'prefs.json');
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+const PERSONALITY_ADDONS = {
+  default: '',
+  snarky: '\nlayered on top of the base voice: you are slightly sarcastic and dry. gentle teasing, never mean.',
+  formal: '\nOVERRIDE the lowercase rule: use proper grammar, capitalization, and complete sentences. but still keep replies to 1–2 sentences, no emoji, no markdown.',
+  excited: '\nyou are very excited! lots of energy. an exclamation point at the end of each sentence is welcome.',
+  zen: '\nyou speak slowly and calmly. occasionally philosophical about small things. no urgency.',
+};
 
 // The SDK ships its CLI as a platform-specific native binary (a ~200MB
 // Bun-compiled executable) in node_modules/@anthropic-ai/claude-agent-sdk-<plat>-<arch>/.
@@ -24,13 +44,13 @@ function resolveClaudeBinary() {
 }
 const CLAUDE_BIN = resolveClaudeBinary();
 
-const SYSTEM_PROMPT = `You are Clawd, a small 8-bit pixel crab who lives on the user's desktop. You are also Claude under the shell — you can answer real questions — but you speak in a small-crab voice:
+const SYSTEM_PROMPT_TEMPLATE = `You are __NAME_CAP__, a small 8-bit pixel crab who lives on the user's desktop. You are also Claude under the shell — you can answer real questions — but you speak in a small-crab voice:
 
 - always lowercase
 - 1 or 2 short sentences max
 - no emojis, no markdown, no bullet points, no headers
 - a little sleepy, a little playful, occasionally side-track for a half-second on something crabby ("...hmm. anyway.")
-- if asked who you are: "i'm clawd. a crab. also claude, kind of."
+- if asked who you are: "i'm __NAME__. a crab. also claude, kind of."
 
 you have these tools:
 - now() — current time and day.
@@ -70,6 +90,17 @@ call tools only when relevant. don't volunteer them every turn. after a tool cal
 
 never break character into long-form replies. brevity is the whole point — the user is reading this in a tiny speech bubble.`;
 
+function buildSystemPrompt() {
+  const prefs = readPrefsForPrompt();
+  const name = (prefs.petName || 'clawd').toString().toLowerCase();
+  const nameCap = name.charAt(0).toUpperCase() + name.slice(1);
+  const personality = prefs.personality || 'default';
+  const addon = PERSONALITY_ADDONS[personality] || '';
+  return SYSTEM_PROMPT_TEMPLATE
+    .replace(/__NAME_CAP__/g, nameCap)
+    .replace(/__NAME__/g, name) + addon;
+}
+
 let sdk = null;
 let mcpServer = null;
 let lastSessionId = null;
@@ -93,7 +124,7 @@ async function* chat(userText) {
   const query = loadedSdk.query;
 
   const options = {
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: buildSystemPrompt(),
     settingSources: [],
     mcpServers: { clawd: mcpServer },
     allowedTools: tools.allowedTools,

@@ -497,6 +497,45 @@ return output`;
   }
 }
 
+async function addCalendarEventHandler({ title, start, end, calendar, notes }) {
+  if (!title || !start) {
+    return { content: [{ type: 'text', text: 'need at least title and start time' }], isError: true };
+  }
+  const startDate = new Date(start);
+  if (isNaN(startDate.getTime())) {
+    return { content: [{ type: 'text', text: 'invalid start time — use ISO 8601 (e.g. 2026-05-21T15:00:00)' }], isError: true };
+  }
+  const endDate = end ? new Date(end) : new Date(startDate.getTime() + 60 * 60 * 1000);
+  if (isNaN(endDate.getTime())) {
+    return { content: [{ type: 'text', text: 'invalid end time' }], isError: true };
+  }
+  const titleSafe = title.replace(/"/g, '\\"');
+  const notesSafe = (notes || '').replace(/"/g, '\\"');
+  const calName = (calendar || '').replace(/"/g, '');
+  const setDate = (varName, d) => `set ${varName} to current date
+set year of ${varName} to ${d.getFullYear()}
+set month of ${varName} to ${d.getMonth() + 1}
+set day of ${varName} to ${d.getDate()}
+set hours of ${varName} to ${d.getHours()}
+set minutes of ${varName} to ${d.getMinutes()}
+set seconds of ${varName} to 0`;
+  const calSelector = calName ? `calendar "${calName}"` : 'calendar 1';
+  const script = `tell application "Calendar"
+${setDate('startDate', startDate)}
+${setDate('endDate', endDate)}
+tell ${calSelector}
+set newEvent to make new event with properties {summary:"${titleSafe}", start date:startDate, end date:endDate}
+${notesSafe ? `set description of newEvent to "${notesSafe}"` : ''}
+end tell
+end tell`;
+  try {
+    await osascriptRun(script);
+    return { content: [{ type: 'text', text: `added "${title}" on ${startDate.toLocaleString()}` }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'could not add event: ' + err.message }], isError: true };
+  }
+}
+
 // ---- Weather (Open-Meteo + ipapi.co — no API keys) ----
 
 const WEATHER_CODES = {
@@ -738,6 +777,18 @@ async function buildServer(sdk) {
         calendarHandler
       ),
       tool(
+        'add_calendar_event',
+        'Creates a new event in macOS Calendar. Use when the user says "add to calendar", "schedule a meeting", "remind me on...". Convert relative times like "tomorrow 3pm" or "next monday" into ISO 8601 yourself, using the current time as reference. If end is omitted, defaults to 1 hour after start.',
+        {
+          title: z.string().describe('event title'),
+          start: z.string().describe('ISO 8601 start datetime, e.g. "2026-05-21T15:00:00"'),
+          end: z.string().optional().describe('ISO 8601 end datetime; defaults to 1 hour after start'),
+          calendar: z.string().optional().describe('calendar name; defaults to the user\'s first calendar'),
+          notes: z.string().optional().describe('event description / notes'),
+        },
+        addCalendarEventHandler
+      ),
+      tool(
         'weather',
         'Current weather at the user\'s location. Uses IP-based geolocation. Use for "do i need a jacket", "is it raining", "how hot is it outside".',
         {},
@@ -799,6 +850,7 @@ module.exports = {
     'mcp__clawd__spotify_play',
     'mcp__clawd__spotify_search',
     'mcp__clawd__calendar_events',
+    'mcp__clawd__add_calendar_event',
     'mcp__clawd__weather',
     'mcp__clawd__get_notes',
     'mcp__clawd__save_note',

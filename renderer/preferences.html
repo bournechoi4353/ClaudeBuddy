@@ -1,0 +1,115 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Clawd Preferences</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f5f0e6;
+      color: #000;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      user-select: none;
+    }
+    body { padding: 22px 26px 28px; }
+    h1 {
+      font-size: 16px;
+      margin: 0 0 4px;
+      letter-spacing: 0.5px;
+    }
+    .subtitle {
+      font-size: 11px;
+      color: #777;
+      margin-bottom: 18px;
+    }
+    label.field {
+      display: block;
+      margin-top: 14px;
+      font-size: 11px;
+      color: #333;
+      letter-spacing: 0.3px;
+    }
+    input[type="text"], select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      border: 1px solid #000;
+      background: #fff;
+      font-family: inherit;
+      font-size: 12px;
+      color: #000;
+      margin-top: 4px;
+    }
+    input[type="range"] {
+      width: 100%;
+      margin-top: 4px;
+    }
+    input[type="color"] {
+      width: 60px;
+      height: 28px;
+      padding: 0;
+      border: 1px solid #000;
+      background: none;
+      cursor: pointer;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    output, .val {
+      font-size: 11px;
+      color: #555;
+      min-width: 40px;
+      text-align: right;
+    }
+    .hint {
+      font-size: 10px;
+      color: #888;
+      margin-top: 3px;
+    }
+    .footer {
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px solid #ddd;
+      font-size: 10px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <h1>Clawd Preferences</h1>
+  <div class="subtitle">Changes save automatically.</div>
+
+  <label class="field" for="petName">Pet name</label>
+  <input type="text" id="petName" placeholder="clawd" maxlength="20">
+  <div class="hint">What the crab calls himself in chat.</div>
+
+  <label class="field" for="personality">Personality</label>
+  <select id="personality">
+    <option value="default">Default — sleepy crab</option>
+    <option value="snarky">Snarky — gentle sarcasm</option>
+    <option value="formal">Formal — proper grammar</option>
+    <option value="excited">Excited — lots of energy</option>
+    <option value="zen">Zen — calm, philosophical</option>
+  </select>
+
+  <label class="field" for="speed">Walk speed: <output id="speedVal">0.5</output> px/frame</label>
+  <input type="range" id="speed" min="0.1" max="2.0" step="0.1">
+
+  <label class="field">Crab color</label>
+  <div class="row">
+    <input type="color" id="color">
+    <span class="val" id="colorVal">#CC785C</span>
+  </div>
+
+  <label class="field" for="sleepMin">Sleep after no chat: <output id="sleepMinVal">3</output> min</label>
+  <input type="range" id="sleepMin" min="1" max="30" step="1">
+
+  <div class="footer">Other settings live in the menubar (size, monitor, Spotify, launch at login).</div>
+
+  <script src="preferences.js"></script>
+</body>
+</html>

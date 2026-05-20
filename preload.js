@@ -15,5 +15,10 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onTimerEnded: (callback) => {
     ipcRenderer.on('clawd-timer-ended', (_e, info) => callback(info));
   },
+  getPrefs: () => ipcRenderer.invoke('prefs:get'),
+  setPref: (updates) => ipcRenderer.send('prefs:set', updates),
+  onPrefsUpdated: (callback) => {
+    ipcRenderer.on('prefs-updated', (_e, updates) => callback(updates));
+  },
   resetChat: () => ipcRenderer.send('chat-reset'),
 });
