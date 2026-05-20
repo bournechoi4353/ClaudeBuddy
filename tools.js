@@ -278,12 +278,18 @@ async function spotifyGetDevices(token) {
   return data.devices || [];
 }
 
-async function spotifyApiPlay(token, trackUri, deviceId) {
+async function spotifyApiPlay(token, trackUri, deviceId, contextUri) {
   const qs = deviceId ? `?device_id=${deviceId}` : '';
+  // Playing with `uris` makes Spotify stop after the track. Playing with a
+  // `context_uri` (the album) + offset keeps the music going through the rest
+  // of the album, and Spotify's Autoplay setting kicks in for singles.
+  const body = contextUri
+    ? { context_uri: contextUri, offset: { uri: trackUri }, position_ms: 0 }
+    : { uris: [trackUri] };
   const res = await fetch(`https://api.spotify.com/v1/me/player/play${qs}`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ uris: [trackUri] }),
+    body: JSON.stringify(body),
   });
   if (res.status === 401) throw new Error('NEEDS_RECONNECT');
   if (res.status === 403) {
@@ -415,7 +421,8 @@ async function spotifyPlayHandler({ query }) {
       device = pickLocalSpotifyDevice(devices);
     }
     if (!device) throw new Error('no device after launch');
-    await spotifyApiPlay(token, track.uri, device.id);
+    const contextUri = track.album && track.album.uri;
+    await spotifyApiPlay(token, track.uri, device.id, contextUri);
     apiPlayed = true;
   } catch (apiErr) {
     // Common reasons we fall through: PREMIUM_REQUIRED (Free account),
