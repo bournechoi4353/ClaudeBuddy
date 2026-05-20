@@ -31,17 +31,21 @@ const rows = CRAB.length;
 const crabW = cols * SCALE;
 const crabH = rows * SCALE;
 
-function fitCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-fitCanvas();
-window.addEventListener('resize', fitCanvas);
-
 let posX = 0;
 let dir = 1;
 const SPEED = 0.5;
 let externallyPaused = false; // chat open
+
+function fitCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  // Clamp Clawd into the new bounds in case the window just moved to a
+  // different-sized monitor.
+  if (posX + crabW > canvas.width) posX = Math.max(0, canvas.width - crabW);
+  if (posX < 0) posX = 0;
+}
+fitCanvas();
+window.addEventListener('resize', fitCanvas);
 
 let walkFrame = 0;
 let lastStep = 0;
@@ -186,35 +190,6 @@ function legRaised(r, c, frame) {
   return false;
 }
 
-// Multi-window architecture: each window covers a single monitor's workArea.
-// MY_IDX = index of this window in the sorted-by-X display list. Monitor 0
-// starts with Clawd; others are passive (transparent, click-through, no draw).
-const _params = new URLSearchParams(window.location.search);
-const MY_IDX = parseInt(_params.get('monitor') || '0', 10);
-const TOTAL_MONITORS = parseInt(_params.get('total') || '1', 10);
-let isActive = MY_IDX === 0;
-
-if (window.crabAPI && window.crabAPI.onSetActive) {
-  window.crabAPI.onSetActive((info) => {
-    isActive = !!info.active;
-    if (isActive) {
-      if (info.edge === 'left') posX = 0;
-      else if (info.edge === 'right') posX = canvas.width - crabW;
-      walkFrame = 0;
-      lastStep = performance.now();
-      lastInteractionAt = performance.now(); // wake on arrival
-      isSleeping = false;
-      // Arrive walking — give a fresh walking window so we don't immediately stop.
-      setState(ST.WALK, 3000 + Math.random() * 4000);
-    } else {
-      // Closing chat if open — it lives in this window and is meaningless after handoff.
-      if (window.Chat && window.Chat.isOpen && window.Chat.isOpen()) {
-        window.Chat.close();
-      }
-    }
-  });
-}
-
 function currentBbox() {
   return {
     x: Math.floor(posX),
@@ -226,7 +201,6 @@ function currentBbox() {
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!isActive) return; // passive window — render nothing
 
   const moving = stateIsMoving() && !externallyPaused && !isSleeping;
   const bob = moving && (walkFrame === 0 || walkFrame === 2) ? -1 : 0;
@@ -305,7 +279,7 @@ function tick() {
     isSleeping = now - lastInteractionAt > SLEEP_AFTER_MS;
   }
 
-  if (isActive && !externallyPaused && !isSleeping) {
+  if (!externallyPaused && !isSleeping) {
     if (now >= stateUntil) pickNextBehavior();
 
     const speed = stateSpeed();
@@ -313,23 +287,13 @@ function tick() {
       posX += dir * speed;
 
       if (posX + crabW >= canvas.width) {
-        if (MY_IDX < TOTAL_MONITORS - 1) {
-          posX = canvas.width - crabW;
-          window.crabAPI.crossMonitor({ direction: 'right' });
-        } else {
-          posX = canvas.width - crabW;
-          dir = -1;
-          setState(ST.BOUNCE_PAUSE, 700);
-        }
+        posX = canvas.width - crabW;
+        dir = -1;
+        setState(ST.BOUNCE_PAUSE, 700);
       } else if (posX <= 0) {
-        if (MY_IDX > 0) {
-          posX = 0;
-          window.crabAPI.crossMonitor({ direction: 'left' });
-        } else {
-          posX = 0;
-          dir = 1;
-          setState(ST.BOUNCE_PAUSE, 700);
-        }
+        posX = 0;
+        dir = 1;
+        setState(ST.BOUNCE_PAUSE, 700);
       }
 
       if (now - lastStep >= stateStepMs()) {
@@ -365,7 +329,6 @@ let lastMouseY = -1;
 let currentlyCapturing = false;
 
 function isOverCrab(x, y) {
-  if (!isActive) return false;
   const b = currentBbox();
   return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
 }

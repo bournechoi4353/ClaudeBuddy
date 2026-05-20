@@ -13,55 +13,55 @@ for (const k of Object.keys(process.env)) {
 
 const agent = require('./agent');
 
-// One BrowserWindow per display, each sized to that monitor's workArea.
-// macOS reliably renders single-monitor windows; a window spanning displays
-// is often invisibly clipped to one of them.
-const allWindows = []; // [{ win, display, idx }]
-let activeMonitorIdx = 0;
+let mainWin = null;
+let currentDisplayId = null;
 
-function createAllWindows() {
-  const displays = screen.getAllDisplays().sort((a, b) => a.bounds.x - b.bounds.x);
-  const total = displays.length;
+function createMainWindow(display) {
+  const wa = display.workArea;
+  currentDisplayId = display.id;
 
-  displays.forEach((display, idx) => {
-    const wa = display.workArea;
-    const win = new BrowserWindow({
-      x: wa.x,
-      y: wa.y,
-      width: wa.width,
-      height: wa.height,
-      transparent: true,
-      frame: false,
-      alwaysOnTop: true,
-      hasShadow: false,
-      resizable: false,
-      skipTaskbar: true,
-      webPreferences: {
-        contextIsolation: true,
-        preload: path.join(__dirname, 'preload.js'),
-      },
-    });
-
-    win.setAlwaysOnTop(true, 'screen-saver');
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    win.setIgnoreMouseEvents(true, { forward: true });
-
-    win.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
-      search: `monitor=${idx}&total=${total}`,
-    });
-
-    allWindows.push({ win, display, idx });
+  mainWin = new BrowserWindow({
+    x: wa.x,
+    y: wa.y,
+    width: wa.width,
+    height: wa.height,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    hasShadow: false,
+    resizable: false,
+    skipTaskbar: true,
+    webPreferences: {
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
   });
+
+  mainWin.setAlwaysOnTop(true, 'screen-saver');
+  mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  mainWin.setIgnoreMouseEvents(true, { forward: true });
+  mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  startAppSwitchWatcher(mainWin);
 }
 
-function senderWindow(event) {
-  const w = BrowserWindow.fromWebContents(event.sender);
-  return allWindows.find((it) => it.win === w);
+function moveToDisplay(display) {
+  if (!mainWin || mainWin.isDestroyed()) return;
+  currentDisplayId = display.id;
+  const wa = display.workArea;
+  mainWin.setBounds({
+    x: wa.x,
+    y: wa.y,
+    width: wa.width,
+    height: wa.height,
+  });
+  rebuildTrayMenu();
 }
 
-ipcMain.on('set-ignore-mouse', (event, ignore) => {
-  const item = senderWindow(event);
-  if (item) item.win.setIgnoreMouseEvents(ignore, { forward: true });
+ipcMain.on('set-ignore-mouse', (_event, ignore) => {
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.setIgnoreMouseEvents(ignore, { forward: true });
+  }
 });
 
 ipcMain.on('chat-send', async (event, text) => {
@@ -80,23 +80,6 @@ ipcMain.on('chat-send', async (event, text) => {
 
 ipcMain.on('chat-reset', () => agent.reset());
 
-// Hand Clawd off from one window to the adjacent one (by display X order).
-ipcMain.handle('clawd:cross-monitor', (event, payload) => {
-  const sender = senderWindow(event);
-  if (!sender) return { crossed: false };
-  const direction = payload && payload.direction;
-  const targetIdx = direction === 'right' ? sender.idx + 1 : sender.idx - 1;
-  if (targetIdx < 0 || targetIdx >= allWindows.length) return { crossed: false };
-
-  activeMonitorIdx = targetIdx;
-  sender.win.webContents.send('clawd-set-active', { active: false });
-  allWindows[targetIdx].win.webContents.send('clawd-set-active', {
-    active: true,
-    edge: direction === 'right' ? 'left' : 'right',
-  });
-  return { crossed: true };
-});
-
 function osascriptOnce(script) {
   return new Promise((resolve, reject) => {
     const p = spawn('osascript', ['-e', script]);
@@ -107,32 +90,51 @@ function osascriptOnce(script) {
   });
 }
 
-function startAppSwitchWatcher() {
+function startAppSwitchWatcher(win) {
   let lastFront = null;
-  const tick = async () => {
+  setInterval(async () => {
     try {
       const front = await osascriptOnce(
         'tell application "System Events" to return name of first application process whose frontmost is true'
       );
-      if (lastFront !== null && front && front !== lastFront) {
-        const active = allWindows[activeMonitorIdx];
-        if (active && !active.win.isDestroyed()) {
-          active.win.webContents.send('clawd-react', { type: 'app-switch', app: front });
-        }
+      if (lastFront !== null && front && front !== lastFront && !win.isDestroyed()) {
+        win.webContents.send('clawd-react', { type: 'app-switch', app: front });
       }
       lastFront = front;
     } catch (_) {
       // ignore — Clawd just won't react this tick
     }
-  };
-  setInterval(tick, 2000);
+  }, 2000);
 }
 
 let tray = null;
+
+function buildMonitorSubmenu() {
+  const displays = screen.getAllDisplays();
+  const primaryId = screen.getPrimaryDisplay().id;
+  return displays.map((d, idx) => {
+    const sizeTag = `${d.bounds.width}×${d.bounds.height}`;
+    const primaryTag = d.id === primaryId ? ' — primary' : '';
+    const base = d.label && d.label.length ? d.label : `Monitor ${idx + 1}`;
+    return {
+      label: `${base} (${sizeTag})${primaryTag}`,
+      type: 'radio',
+      checked: d.id === currentDisplayId,
+      click: () => moveToDisplay(d),
+    };
+  });
+}
+
 function rebuildTrayMenu() {
   const launchAtLogin = app.getLoginItemSettings().openAtLogin;
+  const monitorItems = buildMonitorSubmenu();
   const menu = Menu.buildFromTemplate([
     { label: 'Reset conversation', click: () => agent.reset() },
+    {
+      label: 'Move to monitor',
+      submenu: monitorItems,
+      enabled: monitorItems.length > 1,
+    },
     {
       label: 'Launch at login',
       type: 'checkbox',
@@ -155,11 +157,24 @@ function createTray() {
   rebuildTrayMenu();
 }
 
+// Refresh the monitor list if displays are plugged/unplugged at runtime.
+function watchDisplayChanges() {
+  const rebuild = () => {
+    if (tray) rebuildTrayMenu();
+    // If our current monitor was unplugged, retreat to primary.
+    const stillExists = screen.getAllDisplays().some((d) => d.id === currentDisplayId);
+    if (!stillExists) moveToDisplay(screen.getPrimaryDisplay());
+  };
+  screen.on('display-added', rebuild);
+  screen.on('display-removed', rebuild);
+  screen.on('display-metrics-changed', rebuild);
+}
+
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
-  createAllWindows();
-  startAppSwitchWatcher();
+  createMainWindow(screen.getPrimaryDisplay());
   createTray();
+  watchDisplayChanges();
 });
 
 app.on('window-all-closed', () => {
