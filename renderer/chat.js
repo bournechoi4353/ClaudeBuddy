@@ -42,6 +42,7 @@ function open(crabBbox) {
   }
 
   window.Crab.pause();
+  window.Crab.noteInteraction && window.Crab.noteInteraction();
   setTimeout(() => inputEl.focus(), 0);
 }
 
@@ -84,6 +85,7 @@ inputEl.addEventListener('keydown', (e) => {
     addMessage('you', text);
     inputEl.value = '';
     inFlight = true;
+    window.Crab.noteInteraction && window.Crab.noteInteraction();
     window.crabAPI.sendChatMessage(text);
   } else if (e.key === 'Escape') {
     close();

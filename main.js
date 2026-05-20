@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 
 // Force subscription auth: ignore any inherited API key so credits come from Claude Pro/Max.
@@ -13,11 +13,31 @@ for (const k of Object.keys(process.env)) {
 const agent = require('./agent');
 
 function createWindow() {
-  // Cover the workArea (excludes menubar + dock). The dock renders above
-  // floating windows on macOS, so going edge-to-edge hides Clawd's legs.
-  // workArea bottom = top of dock, which is the lowest spot we can show legs.
-  const display = screen.getPrimaryDisplay();
-  const { x: wx, y: wy, width: ww, height: wh } = display.workArea;
+  // Span ALL connected displays so Clawd can walk across monitors.
+  // We take the bounding box of every display's workArea (excludes menubar + dock
+  // per display). Gaps between non-tiled monitors become dead zones — fine for
+  // typical horizontal arrangements.
+  const displays = screen.getAllDisplays();
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const d of displays) {
+    const wa = d.workArea;
+    minX = Math.min(minX, wa.x);
+    minY = Math.min(minY, wa.y);
+    maxX = Math.max(maxX, wa.x + wa.width);
+    maxY = Math.max(maxY, wa.y + wa.height);
+  }
+  const wx = minX, wy = minY, ww = maxX - minX, wh = maxY - minY;
+
+  // Per-monitor segments in window coords. Each segment has its own X range
+  // and bottomY so Clawd stays on each monitor's visible area, even when
+  // monitors are at different vertical offsets or have gaps between them.
+  const segments = displays
+    .map((d) => ({
+      leftX: d.workArea.x - wx,
+      rightX: d.workArea.x + d.workArea.width - wx,
+      bottomY: d.workArea.y + d.workArea.height - wy,
+    }))
+    .sort((a, b) => a.leftX - b.leftX);
 
   const win = new BrowserWindow({
     width: ww,
@@ -60,10 +80,74 @@ function createWindow() {
 
   ipcMain.on('chat-reset', () => agent.reset());
 
+  ipcMain.handle('clawd:get-layout', () => ({ segments }));
+
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  startAppSwitchWatcher(win);
 }
 
-app.whenReady().then(createWindow);
+const { spawn } = require('child_process');
+function osascriptOnce(script) {
+  return new Promise((resolve, reject) => {
+    const p = spawn('osascript', ['-e', script]);
+    let out = '';
+    p.stdout.on('data', (d) => (out += d.toString()));
+    p.on('close', (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`osa ${code}`))));
+    p.on('error', reject);
+  });
+}
+
+function startAppSwitchWatcher(win) {
+  let lastFront = null;
+  const tick = async () => {
+    try {
+      const front = await osascriptOnce(
+        'tell application "System Events" to return name of first application process whose frontmost is true'
+      );
+      if (lastFront !== null && front && front !== lastFront && !win.isDestroyed()) {
+        win.webContents.send('clawd-react', { type: 'app-switch', app: front });
+      }
+      lastFront = front;
+    } catch (_) {
+      // ignore — Clawd just won't react this tick
+    }
+  };
+  setInterval(tick, 2000);
+}
+
+let tray = null;
+function rebuildTrayMenu() {
+  const launchAtLogin = app.getLoginItemSettings().openAtLogin;
+  const menu = Menu.buildFromTemplate([
+    { label: 'Reset conversation', click: () => agent.reset() },
+    {
+      label: 'Launch at login',
+      type: 'checkbox',
+      checked: launchAtLogin,
+      click: (item) => {
+        app.setLoginItemSettings({ openAtLogin: item.checked });
+        rebuildTrayMenu();
+      },
+    },
+    { type: 'separator' },
+    { label: 'Quit Clawd', click: () => app.quit() },
+  ]);
+  tray.setContextMenu(menu);
+}
+
+function createTray() {
+  tray = new Tray(nativeImage.createEmpty());
+  tray.setTitle('clawd');
+  tray.setToolTip('Clawd');
+  rebuildTrayMenu();
+}
+
+app.whenReady().then(() => {
+  if (app.dock) app.dock.hide();
+  createWindow();
+  createTray();
+});
 
 app.on('window-all-closed', () => {
   app.quit();

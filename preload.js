@@ -6,5 +6,9 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onChatPiece: (callback) => {
     ipcRenderer.on('chat-piece', (_e, piece) => callback(piece));
   },
+  onReact: (callback) => {
+    ipcRenderer.on('clawd-react', (_e, payload) => callback(payload));
+  },
   resetChat: () => ipcRenderer.send('chat-reset'),
+  getLayout: () => ipcRenderer.invoke('clawd:get-layout'),
 });

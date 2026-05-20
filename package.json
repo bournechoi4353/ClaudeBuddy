@@ -4,12 +4,40 @@
   "description": "Clawd — an 8-bit pixel crab Claude pet for your desktop",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --mac --dir",
+    "dist": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "dev.clawd.app",
+    "productName": "Clawd",
+    "files": [
+      "main.js",
+      "preload.js",
+      "agent.js",
+      "tools.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/@anthropic-ai/claude-agent-sdk/**",
+      "**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": "dir",
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "LSUIElement": 1
+      }
+    }
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^26.8.1"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.144"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.144",
+    "zod": "^4.4.3"
   }
 }
