@@ -89,7 +89,7 @@ Click on Clawd and a small speech-bubble panel opens above him. Type, hit **Ente
 - "read my chrome tab", "look at slack", "what does my email say"
 - "what's playing" — Clawd puts on headphones to check Spotify
 - "pause", "skip", "previous track"
-- "play [song or artist name]" — opens Spotify with the search results
+- "play [song or artist name]" — plays the first matching track if you've set up Spotify API credentials (see below); otherwise opens the search page
 
 Mundane questions ("what's 2+2") just stream back without any tool use.
 
@@ -101,6 +101,34 @@ Click `clawd` in the macOS menubar (top-right area, near time/wifi). Options:
 - **Move to monitor →** — list of every connected display; click to instantly move Clawd to that one
 - **Launch at login** — checkbox; toggle on to have Clawd start every time you log in to your Mac
 - **Quit Clawd**
+
+### Spotify auto-play setup (optional)
+
+Out of the box, "play \<song\>" opens Spotify's search page and you click to play. To make Clawd actually play the first result automatically:
+
+1. Go to <https://developer.spotify.com/dashboard>, log in with your Spotify account, click **Create app**.
+2. Fill in the form:
+   - **App name / description:** anything.
+   - **Redirect URI:** `http://127.0.0.1:8888/callback` — type it into the field then **click the Add button next to the field** so it appears as a chip below. (Spotify rejects the form if you don't actually click Add. We never use this URL — it's just required by the form.)
+   - **Which API/SDKs:** check **Web API** only.
+   - Agree to the terms, click **Save**.
+3. On the app's dashboard page, copy the **Client ID**. Click **View client secret** to reveal the secret and copy that too.
+4. Open Clawd's prefs file in TextEdit:
+   ```
+   open -e ~/Library/Application\ Support/Clawd/prefs.json
+   ```
+   Add the two keys (keep any existing keys like `scale`):
+   ```json
+   {
+     "scale": 6,
+     "spotifyClientId": "your_client_id",
+     "spotifyClientSecret": "your_client_secret"
+   }
+   ```
+   Save with ⌘+S.
+5. **No relaunch needed.** Clawd re-reads the prefs file every 5 seconds. Ask "play hello by adele" and it should play immediately.
+
+The credentials only let Clawd search Spotify's public catalog via the client-credentials flow — they don't access your account, playlists, or playback history. Actual playback is still triggered through the local Spotify desktop app via AppleScript using the track URI returned by the search.
 
 ### When Clawd sleeps
 
@@ -152,7 +180,7 @@ The `npm run pack` script defaults to whatever architecture you're on. If you ne
 - **macOS only.** AppleScript + desktopCapturer + macOS-specific tray behavior.
 - **Ad-hoc signed.** Every rebuild gets a new code-signing hash, so macOS may forget Screen Recording permission across rebuilds. A proper Developer ID signature (`$99 / year` Apple Developer Program) would fix this.
 - **One monitor at a time.** Use the tray submenu to switch — cross-monitor traversal was glitchy on macOS so it's gone.
-- **Spotify `play <song>` opens search, doesn't auto-play.** Auto-playing would require integrating the Spotify Web API (with OAuth setup) — not wired up yet.
+- **Spotify auto-play needs API credentials.** Free but requires creating a Spotify developer app (see setup above). Without it, "play \<song\>" falls back to opening the search page.
 - **Notification reactions are app-switch reactions.** macOS doesn't expose system notifications without private APIs or Full Disk Access against the notification SQLite database. App-switch is the closest analog.
 
 ---

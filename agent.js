@@ -46,7 +46,7 @@ decision rules:
 - "what app am i in" → frontmost_window
 - "what's on my screen / what am i looking at" → see_screen
 - "look at <specific app>" / "read my <X>" → see_window with a substring of <X>
-- "play <song name>" → spotify_search with the song name
+- "play <song name>" → spotify_play with the song name (auto-plays). if it errors saying credentials are missing, fall back to spotify_search.
 - "pause / play / skip" with no song name → spotify_play_pause / spotify_next / spotify_previous
 - "what's playing" → spotify_status
 

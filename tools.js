@@ -2,8 +2,26 @@
 // Built lazily because the SDK is ESM-only and has to be dynamic-imported.
 
 const { spawn } = require('child_process');
-const { desktopCapturer, screen, BrowserWindow, systemPreferences } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { desktopCapturer, screen, BrowserWindow, systemPreferences, app: electronApp } = require('electron');
 const { z } = require('zod');
+
+// Re-read prefs every few seconds so the user can drop in Spotify credentials
+// without restarting Clawd.
+let _cachedPrefs = null;
+let _cachedPrefsAt = 0;
+function getPrefs() {
+  if (_cachedPrefs && Date.now() - _cachedPrefsAt < 5000) return _cachedPrefs;
+  try {
+    const p = path.join(electronApp.getPath('userData'), 'prefs.json');
+    _cachedPrefs = JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    _cachedPrefs = {};
+  }
+  _cachedPrefsAt = Date.now();
+  return _cachedPrefs;
+}
 
 function osascriptRun(script) {
   return new Promise((resolve, reject) => {
@@ -199,6 +217,73 @@ end tell`);
   }
 }
 
+// ---- Spotify Web API (client credentials) for auto-play of search results.
+// Only used by spotify_play; spotify_search stays AppleScript-only.
+
+let _spotifyToken = null;
+let _spotifyTokenExpires = 0;
+
+async function getSpotifyToken(clientId, clientSecret) {
+  if (_spotifyToken && Date.now() < _spotifyTokenExpires) return _spotifyToken;
+  const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${auth}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  });
+  if (!res.ok) throw new Error(`spotify auth failed (${res.status})`);
+  const data = await res.json();
+  _spotifyToken = data.access_token;
+  _spotifyTokenExpires = Date.now() + (data.expires_in * 1000) - 60000;
+  return _spotifyToken;
+}
+
+async function spotifyApiSearchTrack(query, token) {
+  const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=1`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`spotify search failed (${res.status})`);
+  const data = await res.json();
+  return data.tracks && data.tracks.items && data.tracks.items[0];
+}
+
+async function spotifyPlayHandler({ query }) {
+  const prefs = getPrefs();
+  const clientId = prefs.spotifyClientId;
+  const clientSecret = prefs.spotifyClientSecret;
+  if (!clientId || !clientSecret) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            'spotify auto-play needs api credentials. add spotifyClientId and spotifyClientSecret to ~/Library/Application Support/Clawd/prefs.json. get them free at developer.spotify.com (create an app, copy client id + secret). i can use spotify_search to open the search page for you instead.',
+        },
+      ],
+      isError: true,
+    };
+  }
+  try {
+    const token = await getSpotifyToken(clientId, clientSecret);
+    const track = await spotifyApiSearchTrack(query, token);
+    if (!track) {
+      return { content: [{ type: 'text', text: `no spotify results for "${query}"` }] };
+    }
+    await osascriptRun(`tell application "Spotify"
+activate
+play track "${track.uri}"
+end tell`);
+    const artists = (track.artists || []).map((a) => a.name).join(', ');
+    return {
+      content: [{ type: 'text', text: `playing "${track.name}"${artists ? ' by ' + artists : ''}` }],
+    };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'spotify error: ' + (err.message || err) }], isError: true };
+  }
+}
+
 async function spotifySearchHandler({ query }) {
   const q = (query || '').replace(/"/g, '');
   if (!q) {
@@ -306,8 +391,14 @@ async function buildServer(sdk) {
         spotifyPlayUriHandler
       ),
       tool(
+        'spotify_play',
+        'Searches Spotify and IMMEDIATELY PLAYS the first matching track. Use this for any "play X" request when the user names a song or artist. Requires Spotify API credentials in prefs.json; if missing, the tool returns an error explaining how to set them up and the user can fall back to spotify_search.',
+        { query: z.string().describe('song name, artist, or "song by artist"') },
+        spotifyPlayHandler
+      ),
+      tool(
         'spotify_search',
-        'Opens Spotify with a search results page for the given query. Use for "play <song>" requests — it cannot auto-play the result (that requires the Spotify Web API which is not configured), but it brings up the song in Spotify for the user to click.',
+        'Opens Spotify with a search results page for the given query without playing anything. Use only if spotify_play failed because credentials are missing.',
         { query: z.string().describe('a song, artist, or album name to search for') },
         spotifySearchHandler
       ),
@@ -327,6 +418,7 @@ module.exports = {
     'mcp__clawd__spotify_next',
     'mcp__clawd__spotify_previous',
     'mcp__clawd__spotify_play_uri',
+    'mcp__clawd__spotify_play',
     'mcp__clawd__spotify_search',
   ],
 };

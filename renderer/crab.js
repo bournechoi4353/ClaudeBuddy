@@ -145,6 +145,63 @@ let isSleeping = false;
 function noteInteraction() {
   lastInteractionAt = performance.now();
   isSleeping = false;
+  zParticles.length = 0; // clear floating z's on wake
+}
+
+// Floating "Z" particles emitted while sleeping. Each rises and fades.
+const Z_GRID = ['###', '..#', '.#.', '#..', '###'];
+const zParticles = [];
+let lastZSpawnAt = 0;
+const Z_SPAWN_INTERVAL_MS = 1400;
+const Z_LIFE_MS = 2600;
+
+function spawnZIfSleeping(now) {
+  if (!isSleeping) return;
+  if (now - lastZSpawnAt < Z_SPAWN_INTERVAL_MS) return;
+  const bbox = currentBbox();
+  zParticles.push({
+    x: bbox.x + bbox.w * 0.65 + (Math.random() - 0.5) * SCALE,
+    y: bbox.y - SCALE,
+    vx: (Math.random() - 0.3) * 0.015 * SCALE,
+    vy: -0.025 * SCALE,
+    age: 0,
+  });
+  lastZSpawnAt = now + Math.random() * 600;
+}
+
+function updateZParticles(dtMs) {
+  for (let i = zParticles.length - 1; i >= 0; i--) {
+    const p = zParticles[i];
+    p.age += dtMs;
+    if (p.age >= Z_LIFE_MS) {
+      zParticles.splice(i, 1);
+      continue;
+    }
+    p.x += p.vx * dtMs;
+    p.y += p.vy * dtMs;
+  }
+}
+
+function drawZParticles() {
+  if (zParticles.length === 0) return;
+  const pixelSize = Math.max(2, Math.floor(SCALE / 2));
+  ctx.fillStyle = COLORS.X;
+  for (const p of zParticles) {
+    const t = p.age / Z_LIFE_MS;
+    let alpha;
+    if (t < 0.15) alpha = t / 0.15;
+    else if (t > 0.7) alpha = (1 - t) / 0.3;
+    else alpha = 1;
+    ctx.globalAlpha = alpha;
+    for (let r = 0; r < Z_GRID.length; r++) {
+      for (let c = 0; c < Z_GRID[r].length; c++) {
+        if (Z_GRID[r][c] === '#') {
+          ctx.fillRect(Math.floor(p.x) + c * pixelSize, Math.floor(p.y) + r * pixelSize, pixelSize, pixelSize);
+        }
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 // Accessories — overlay pixel art (glasses, headphones, etc.) toggled by
@@ -287,15 +344,25 @@ function draw() {
   } else if (accessory) {
     accessory = null;
   }
+
+  // Z's float on top of everything (drawn last so they're visible even over the body).
+  drawZParticles();
 }
 
+let lastTickAt = performance.now();
 function tick() {
   const now = performance.now();
+  const dtMs = Math.min(50, now - lastTickAt); // clamp dt so tab-switch returns don't teleport particles
+  lastTickAt = now;
 
   // Update sleep state every tick.
   if (!externallyPaused) {
     isSleeping = now - lastInteractionAt > SLEEP_AFTER_MS;
   }
+
+  // Sleep visuals.
+  spawnZIfSleeping(now);
+  updateZParticles(dtMs);
 
   if (!externallyPaused && !isSleeping) {
     if (now >= stateUntil) pickNextBehavior();
