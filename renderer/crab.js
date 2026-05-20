@@ -41,13 +41,72 @@ window.addEventListener('resize', fitCanvas);
 let posX = 0;
 let dir = 1;
 const SPEED = 0.5;
-let isWalking = true;
-let resumeWalkAt = 0;
 let externallyPaused = false; // chat open
 
 let walkFrame = 0;
 let lastStep = 0;
 const STEP_MS = 220;
+
+// Behavior state machine — gives Clawd unpredictable personality instead of
+// just bouncing left/right forever. Each state has a duration; on expiry the
+// next state is picked probabilistically.
+const ST = {
+  WALK: 'walk',           // moves at SPEED in dir
+  SCUTTLE: 'scuttle',     // moves at 2x SPEED, faster leg cycle
+  IDLE: 'idle',           // stands still, planted legs, looking around (blinks)
+  STRETCH: 'stretch',     // tiny upward bob arc, no horizontal movement
+  BOUNCE_PAUSE: 'bounce', // brief pause after hitting an outer wall
+};
+let behaviorState = ST.WALK;
+let stateStartedAt = performance.now();
+let stateUntil = performance.now() + 3000;
+
+function setState(state, durationMs) {
+  behaviorState = state;
+  stateStartedAt = performance.now();
+  stateUntil = stateStartedAt + durationMs;
+}
+
+function pickNextBehavior() {
+  // Returning from a stop: resume walking, sometimes flipped.
+  if (
+    behaviorState === ST.IDLE ||
+    behaviorState === ST.STRETCH ||
+    behaviorState === ST.BOUNCE_PAUSE
+  ) {
+    if (Math.random() < 0.35) dir = -dir;
+    setState(ST.WALK, 4000 + Math.random() * 6000);
+    return;
+  }
+  if (behaviorState === ST.SCUTTLE) {
+    setState(ST.WALK, 3000 + Math.random() * 4000);
+    return;
+  }
+  // From WALK, pick a new mood.
+  const r = Math.random();
+  if (r < 0.25)      setState(ST.IDLE,    1500 + Math.random() * 3000);
+  else if (r < 0.35) setState(ST.STRETCH, 700  + Math.random() * 400);
+  else if (r < 0.45) setState(ST.SCUTTLE, 1500 + Math.random() * 2000);
+  else {
+    if (Math.random() < 0.25) dir = -dir; // sometimes turn around mid-stride
+    setState(ST.WALK, 2000 + Math.random() * 4000);
+  }
+}
+
+function stateSpeed() {
+  if (behaviorState === ST.WALK) return SPEED;
+  if (behaviorState === ST.SCUTTLE) return SPEED * 2;
+  return 0;
+}
+
+function stateStepMs() {
+  if (behaviorState === ST.SCUTTLE) return Math.floor(STEP_MS / 2);
+  return STEP_MS;
+}
+
+function stateIsMoving() {
+  return behaviorState === ST.WALK || behaviorState === ST.SCUTTLE;
+}
 
 let eyesClosed = false;
 let nextBlink = 0;
@@ -58,13 +117,54 @@ function scheduleBlink(t) {
 scheduleBlink(performance.now());
 
 // Sleep — after N ms of no chat interaction, Clawd dozes off.
-const SLEEP_AFTER_MS = 5 * 60 * 1000;
+const SLEEP_AFTER_MS = 3 * 60 * 1000;
 let lastInteractionAt = performance.now();
 let isSleeping = false;
 function noteInteraction() {
   lastInteractionAt = performance.now();
   isSleeping = false;
 }
+
+// Accessories — overlay pixel art (glasses, headphones, etc.) toggled by
+// tool-use events streaming from the agent.
+let accessory = null;
+let accessoryUntil = 0;
+function setAccessory(type, durationMs) {
+  accessory = type;
+  accessoryUntil = performance.now() + (durationMs || 12000);
+}
+function clearAccessory() {
+  accessory = null;
+  accessoryUntil = 0;
+}
+function handleToolUse(name) {
+  if (!name) return;
+  if (name.includes('see_screen') || name.includes('see_window')) setAccessory('glasses');
+  else if (name.includes('spotify_')) setAccessory('headphones');
+  else if (name.includes('frontmost_window')) setAccessory('glasses');
+}
+
+const ACCESSORY_CELLS = {
+  glasses: [
+    // Left lens around eye (col 3, row 1)
+    [2, 0], [3, 0], [4, 0],
+    [2, 1], [4, 1],
+    [2, 2], [3, 2], [4, 2],
+    // Bridge between lenses
+    [5, 1], [6, 1],
+    // Right lens around eye (col 8, row 1)
+    [7, 0], [8, 0], [9, 0],
+    [7, 1], [9, 1],
+    [7, 2], [8, 2], [9, 2],
+  ],
+  headphones: [
+    // Band across top of head
+    [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0], [9, 0],
+    // Ear cups (one cell outside the body on each side)
+    [1, 1], [1, 2],
+    [10, 1], [10, 2],
+  ],
+};
 
 // Jump reaction — main process pushes a "clawd-react" IPC when frontmost app
 // changes (and could push other events later).
@@ -100,11 +200,12 @@ if (window.crabAPI && window.crabAPI.onSetActive) {
     if (isActive) {
       if (info.edge === 'left') posX = 0;
       else if (info.edge === 'right') posX = canvas.width - crabW;
-      isWalking = true;
       walkFrame = 0;
       lastStep = performance.now();
       lastInteractionAt = performance.now(); // wake on arrival
       isSleeping = false;
+      // Arrive walking — give a fresh walking window so we don't immediately stop.
+      setState(ST.WALK, 3000 + Math.random() * 4000);
     } else {
       // Closing chat if open — it lives in this window and is meaningless after handoff.
       if (window.Chat && window.Chat.isOpen && window.Chat.isOpen()) {
@@ -127,8 +228,15 @@ function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!isActive) return; // passive window — render nothing
 
-  const moving = isWalking && !externallyPaused && !isSleeping;
+  const moving = stateIsMoving() && !externallyPaused && !isSleeping;
   const bob = moving && (walkFrame === 0 || walkFrame === 2) ? -1 : 0;
+
+  // Stretch bob: sine-arc up to ~3px during the stretch state.
+  let stretchY = 0;
+  if (behaviorState === ST.STRETCH && stateUntil > stateStartedAt) {
+    const t = (performance.now() - stateStartedAt) / (stateUntil - stateStartedAt);
+    if (t > 0 && t < 1) stretchY = -Math.sin(t * Math.PI) * 3;
+  }
   const bbox = currentBbox();
   const drawX = bbox.x;
 
@@ -143,7 +251,7 @@ function draw() {
     }
   }
 
-  const drawY = bbox.y + bob + Math.round(reactY);
+  const drawY = bbox.y + bob + Math.round(reactY + stretchY);
   const frame = moving ? walkFrame : 0;
   // Force eyes closed while sleeping (overrides blink scheduler).
   const eyesShown = !(eyesClosed || isSleeping);
@@ -174,6 +282,19 @@ function draw() {
       }
     }
   }
+
+  // Accessories on top of everything else.
+  if (accessory && performance.now() < accessoryUntil) {
+    const cells = ACCESSORY_CELLS[accessory];
+    if (cells) {
+      ctx.fillStyle = COLORS.X;
+      for (const [c, r] of cells) {
+        ctx.fillRect(drawX + c * SCALE, drawY + r * SCALE, SCALE, SCALE);
+      }
+    }
+  } else if (accessory) {
+    accessory = null;
+  }
 }
 
 function tick() {
@@ -185,24 +306,20 @@ function tick() {
   }
 
   if (isActive && !externallyPaused && !isSleeping) {
-    if (!isWalking && now >= resumeWalkAt) {
-      isWalking = true;
-      lastStep = now;
-    }
+    if (now >= stateUntil) pickNextBehavior();
 
-    if (isWalking) {
-      posX += dir * SPEED;
+    const speed = stateSpeed();
+    if (speed > 0) {
+      posX += dir * speed;
 
       if (posX + crabW >= canvas.width) {
         if (MY_IDX < TOTAL_MONITORS - 1) {
-          // Hand off to the monitor on our right.
           posX = canvas.width - crabW;
           window.crabAPI.crossMonitor({ direction: 'right' });
         } else {
           posX = canvas.width - crabW;
           dir = -1;
-          isWalking = false;
-          resumeWalkAt = now + 700;
+          setState(ST.BOUNCE_PAUSE, 700);
         }
       } else if (posX <= 0) {
         if (MY_IDX > 0) {
@@ -211,14 +328,17 @@ function tick() {
         } else {
           posX = 0;
           dir = 1;
-          isWalking = false;
-          resumeWalkAt = now + 700;
+          setState(ST.BOUNCE_PAUSE, 700);
         }
       }
-      if (now - lastStep >= STEP_MS) {
+
+      if (now - lastStep >= stateStepMs()) {
         walkFrame = (walkFrame + 1) % 4;
         lastStep = now;
       }
+    } else {
+      // Planted — feet down.
+      walkFrame = 0;
     }
   }
 
@@ -294,6 +414,8 @@ window.Crab = {
   getBbox: currentBbox,
   noteInteraction,
   isSleeping: () => isSleeping,
+  handleToolUse,
+  clearAccessory,
 };
 
 tick();

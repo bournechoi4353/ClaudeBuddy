@@ -14,6 +14,10 @@ let currentReplyEl = null;
 let inFlight = false;
 
 window.crabAPI.onChatPiece((piece) => {
+  if (piece.type === 'tool') {
+    if (window.Crab && window.Crab.handleToolUse) window.Crab.handleToolUse(piece.name);
+    return;
+  }
   if (piece.type === 'chunk') {
     if (!currentReplyEl) {
       currentReplyEl = document.createElement('div');
@@ -29,6 +33,7 @@ window.crabAPI.onChatPiece((piece) => {
   } else if (piece.type === 'done') {
     currentReplyEl = null;
     inFlight = false;
+    if (window.Crab && window.Crab.clearAccessory) window.Crab.clearAccessory();
   }
 });
 

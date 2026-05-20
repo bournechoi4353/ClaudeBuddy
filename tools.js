@@ -2,7 +2,7 @@
 // Built lazily because the SDK is ESM-only and has to be dynamic-imported.
 
 const { spawn } = require('child_process');
-const { desktopCapturer, screen, BrowserWindow } = require('electron');
+const { desktopCapturer, screen, BrowserWindow, systemPreferences } = require('electron');
 const { z } = require('zod');
 
 function osascriptRun(script) {
@@ -26,7 +26,19 @@ async function nowHandler() {
   return { content: [{ type: 'text', text }] };
 }
 
+function assertScreenPermission() {
+  if (process.platform !== 'darwin') return;
+  if (!systemPreferences.getMediaAccessStatus) return;
+  const status = systemPreferences.getMediaAccessStatus('screen');
+  if (status !== 'granted') {
+    throw new Error(
+      `screen recording permission is "${status}". open System Settings → Privacy & Security → Screen Recording, enable Clawd, then fully quit & relaunch Clawd (a relaunch is required for macOS to honor the new permission).`
+    );
+  }
+}
+
 async function captureScreenPng() {
+  assertScreenPermission();
   // Briefly hide Clawd so he doesn't appear in his own screenshot.
   const wins = BrowserWindow.getAllWindows();
   const mainWin = wins[0];
@@ -47,7 +59,7 @@ async function captureScreenPng() {
       thumbnailSize: { width: tw, height: th },
     });
     const primary = sources[0];
-    if (!primary) throw new Error('no screen source available (check Screen Recording permission)');
+    if (!primary) throw new Error('no screen source available');
     return primary.thumbnail.toPNG();
   } finally {
     if (mainWin) mainWin.setOpacity(prevOpacity);
@@ -75,6 +87,7 @@ async function seeScreenHandler() {
 }
 
 async function captureWindowByQuery(query) {
+  assertScreenPermission();
   const sources = await desktopCapturer.getSources({
     types: ['window'],
     thumbnailSize: { width: 1280, height: 800 },

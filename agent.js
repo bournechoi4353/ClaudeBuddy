@@ -103,6 +103,13 @@ async function* chat(userText) {
           ev.delta.type === 'text_delta'
         ) {
           yield { type: 'chunk', text: ev.delta.text };
+        } else if (
+          ev &&
+          ev.type === 'content_block_start' &&
+          ev.content_block &&
+          ev.content_block.type === 'tool_use'
+        ) {
+          yield { type: 'tool', name: ev.content_block.name };
         }
       } else if (msg.type === 'result') {
         if (msg.session_id) lastSessionId = msg.session_id;
