@@ -27,12 +27,21 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
-      "target": "dir",
+      "target": "dmg",
       "icon": "build/icon.png",
       "identity": "Clawd Self-Signed",
       "extendInfo": {
         "LSUIElement": 1
       }
+    },
+    "dmg": {
+      "title": "Clawd",
+      "icon": "build/icon.png",
+      "contents": [
+        { "x": 140, "y": 220, "type": "file" },
+        { "x": 400, "y": 220, "type": "link", "path": "/Applications" }
+      ],
+      "window": { "width": 540, "height": 380 }
     }
   },
   "devDependencies": {

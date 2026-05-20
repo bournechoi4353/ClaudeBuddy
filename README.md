@@ -1,186 +1,185 @@
 # Clawd
 
-A pixel-art crab pet that lives on your macOS desktop and is also Claude. Click him to chat. He can look at your screen, control Spotify, react when you switch apps, take naps when ignored, and walk back and forth along the bottom of whichever monitor you choose.
+A pixel-art crab pet that lives on your macOS desktop and is also Claude. Click him to chat. He can look at your screen, control Spotify, react when you switch apps, take naps when ignored, and walk around the bottom of whichever monitor you pick.
 
 Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no API key, no per-token billing**.
 
 ---
 
+## Install
+
+Open Terminal and paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.sh | bash
+```
+
+That's it. The installer:
+- checks your machine meets the requirements
+- pulls the source
+- builds Clawd locally
+- signs it with a local certificate
+- installs it to `/Applications`
+
+Takes 2–3 minutes the first time, ~30 seconds for subsequent reinstalls.
+
+### First launch
+
+macOS will block the first launch because Clawd isn't signed by an Apple Developer account. **One-time workaround:**
+
+1. Open Finder → Applications
+2. **Right-click `Clawd` → Open** (don't double-click)
+3. Click **Open** in the Gatekeeper warning
+
+After that, Clawd is trusted — Spotlight, Launchpad, double-click all work normally.
+
+---
+
 ## Requirements
 
-- **macOS on Apple Silicon (M1 / M2 / M3 / M4).** Intel Macs need a fresh build (see below). Windows / Linux not supported.
-- **A Claude Pro or Max subscription.** Free Claude.ai accounts can't drive the Agent SDK.
-- **Claude Code CLI**, LOGGED IN TO THAT SUBSCRIPTION. Install instructions: <https://docs.claude.com/en/docs/claude-code/quickstart>. After installing, run `claude login` once and choose your subscription account.
-- **Node.js 20 or newer** (`node --version` should report v20.x or higher).
-- **Spotify desktop app** — optional, only needed if you want Clawd to control music.
+- **macOS on Apple Silicon** (M1 / M2 / M3 / M4). Intel is not supported.
+- **Node.js 20+** — used to build Clawd. Install with `brew install node` or from <https://nodejs.org>.
+- **Claude Pro or Max subscription.**
+- **Claude Code installed, signed in** — install from <https://claude.com/code>, then run `claude login` in a terminal. Clawd won't be able to chat without this.
+- **Optional:** Spotify desktop app, if you want Clawd to control music.
 
 ---
 
-## Installation
+## Set up Claude (one-time)
 
-### 1. Clone the repo
+Clawd uses your subscription instead of an API key. To wire it up:
 
-```
-git clone https://github.com/bournechoi4353/ClaudeBuddy.git
-cd ClaudeBuddy
-```
+1. Install Claude Code: <https://claude.com/code>
+2. In any terminal:
 
-### 2. Install dependencies
+   ```bash
+   claude login
+   ```
 
-```
-npm install
-```
+3. Sign in with your Claude Pro/Max account.
 
-This will pull Electron (~180 MB) and the Claude Agent SDK. Takes 1–2 minutes the first time.
-
-### 3. (Recommended) Set up a self-signed code-signing cert
-
-```
-npm run setup-signing
-```
-
-Creates a self-signed code-signing certificate in your login keychain. Asks once for your keychain password during the trust step. Without this you can still build (electron-builder will fall back to ad-hoc signing), but macOS will forget Screen Recording permission on every rebuild because the ad-hoc signature changes. With a stable self-signed identity, permissions persist across builds.
-
-This does *not* remove the first-launch Gatekeeper warning — that requires a paid Apple Developer ID ($99/yr).
-
-### 4. Build the app
-
-```
-npm run pack
-```
-
-This produces `dist/mac-arm64/Clawd.app`. Takes about a minute.
-
-### 5. Move Clawd into Applications
-
-```
-cp -R dist/mac-arm64/Clawd.app /Applications/
-```
-
-### 6. First launch (one-time Gatekeeper step)
-
-Because Clawd is ad-hoc signed (no Apple Developer ID), macOS will block the first launch.
-
-1. Open **Finder → Applications**.
-2. **Right-click `Clawd` → Open** (don't double-click).
-3. Click **Open** in the warning dialog.
-
-After this once, Clawd is trusted and you can launch normally — Spotlight (`⌘+Space → "clawd"`), Launchpad, double-click, etc.
+Now Clawd can chat. He reads the credentials Claude Code writes to `~/.claude/.credentials.json` — there's nothing to add to Clawd's config.
 
 ---
 
-## Granting permissions
+## Optional: Spotify auto-play
 
-The first time you ask Clawd to look at your screen, macOS will prompt for **Screen Recording** permission.
+1. Click the **`clawd`** label in your macOS menubar (top-right area).
+2. Pick **Connect Spotify…**
+3. Browser opens to Spotify's authorization page. Sign in if needed, click **Agree**.
+4. Browser shows "clawd is connected to spotify" — close the tab.
 
-1. Click Clawd → ask **"what's on my screen?"**
-2. macOS pops up a Screen Recording permission dialog. Click **Open System Settings**.
-3. Toggle **Clawd** on under **Privacy & Security → Screen Recording**.
-4. **Quit Clawd via the tray menu** (the `clawd` text in the top-right menubar → Quit Clawd). This step is required — macOS only honors the new permission after a full restart.
-5. Launch Clawd again. Ask the same question — he should now see your screen.
+After that, ask Clawd things like "play hello by adele" and it just plays. (Spotify Premium users get a flash-free experience via the Spotify Web API; Free users fall back to AppleScript-controlled playback with focus restoration.)
 
-> **Note:** If you ran `npm run setup-signing` (step 3), permissions persist across rebuilds. If you skipped that step, you'll need to re-grant after every `npm run pack` since ad-hoc signatures change each build.
+The menubar item flips to **Disconnect Spotify** for whenever you want to revoke. Clawd never sees your password — it's a standard OAuth flow with the credential stored locally on your Mac.
+
+---
+
+## Granting Screen Recording
+
+The first time Clawd peeks at your screen (`see_screen` / `see_window` tools), macOS pops a permission prompt.
+
+1. Click Clawd → ask "what's on my screen?"
+2. Click **Open System Settings** in the prompt
+3. Toggle **Clawd** on under Privacy & Security → Screen Recording
+4. **Quit Clawd via the menubar** (`clawd` → Quit Clawd) and relaunch — macOS only honors the new permission after a full restart.
+
+Because the installer uses a stable self-signed certificate, this grant persists across future Clawd updates. You won't have to redo it.
 
 ---
 
 ## Using Clawd
 
-Clawd walks back and forth along the bottom of one monitor. He has a small set of behaviors he mixes — walking, idle pauses, stretches, occasional fast scuttle bursts, and reactions to app switches.
+Clawd walks back and forth along the bottom of one monitor. He mixes a few behaviors (walking, idle pauses, stretches, occasional fast scuttle bursts) and hops when you switch apps.
 
 ### Chatting
 
-Click on Clawd and a small speech-bubble panel opens above him. Type, hit **Enter**. Hit **Esc** or click outside the panel to close it.
+Click on Clawd → small chat panel opens above him. Type, hit Enter. Esc or click outside the panel to close.
 
 ### Things you can ask
 
 - "what time is it"
 - "what app am i in"
 - "what's on my screen" — Clawd puts on reading glasses while he looks
-- "read my chrome tab", "look at slack", "what does my email say"
+- "read my chrome tab", "look at slack"
 - "what's playing" — Clawd puts on headphones to check Spotify
 - "pause", "skip", "previous track"
-- "play [song or artist name]" — plays the first matching track if you've connected Spotify (see below); otherwise Clawd will ask you to connect
+- "play [song or artist name]" — plays the first matching track if you've connected Spotify
 
 Mundane questions ("what's 2+2") just stream back without any tool use.
 
 ### Tray menu
 
-Click `clawd` in the macOS menubar (top-right area, near time/wifi). Options:
+Click `clawd` in the macOS menubar. Options:
 
 - **Reset conversation** — clears Clawd's memory of the current chat
-- **Move to monitor →** — list of every connected display; click to instantly move Clawd to that one
-- **Launch at login** — checkbox; toggle on to have Clawd start every time you log in to your Mac
+- **Size →** — small / medium / large / huge
+- **Move to monitor →** — pick which display Clawd lives on
+- **Connect Spotify…** / **Disconnect Spotify**
+- **Launch at login** — checkbox; toggle on to start Clawd every time you log in
 - **Quit Clawd**
-
-### Spotify auto-play (optional)
-
-Out of the box, Clawd doesn't have Spotify auto-play wired up. To enable it:
-
-1. Click the **`clawd`** label in your macOS menubar (top-right area).
-2. Pick **Connect Spotify…**
-3. Your browser opens to a Spotify authorization page. Log in with your Spotify account if needed, click **Agree**.
-4. Browser shows "clawd is connected to spotify" — you can close the tab.
-5. Done. The menu item flips to **Disconnect Spotify** for whenever you want to revoke.
-
-That's it. No developer dashboard, no API credentials, no editing config files. Clawd uses Spotify's OAuth PKCE flow — only your account is involved, no shared infrastructure.
-
-After connecting, ask Clawd things like "play hello by adele" or "play some daft punk". He searches Spotify and tells your local desktop Spotify to play the first result. The Spotify window stays hidden (won't steal focus while you're working).
 
 ### When Clawd sleeps
 
-After about 3 minutes with no chat interaction, Clawd dozes off — eyes closed, no walking. Click him or send a message and he wakes up immediately.
+After about 3 minutes of no chat interaction, Clawd dozes off — eyes closed, no walking, little `z` characters float up from his head. Click him or send a message and he wakes immediately.
 
 ---
 
 ## Updating Clawd
 
-When you pull new code or change something locally:
+Run the installer again — it pulls the latest source and rebuilds:
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.sh | bash
 ```
-git pull
-npm run pack
+
+After updating, right-click → Open the first time because the signature changed.
+
+## Uninstalling Clawd
+
+```bash
+pkill -f Clawd.app 2>/dev/null
 rm -rf /Applications/Clawd.app
-cp -R dist/mac-arm64/Clawd.app /Applications/
+rm -rf "$HOME/Library/Application Support/Clawd"
+rm -rf "$HOME/Library/Application Support/Clawd-src"
+tccutil reset ScreenCapture dev.clawd.app 2>/dev/null
+osascript -e 'tell application "System Events" to delete login item "Clawd"' 2>/dev/null
 ```
-
-Then right-click → Open the first time (signature changed). If Screen Recording stops working, re-grant per the steps above.
-
----
-
-## Building for Intel Macs
-
-The `npm run pack` script defaults to whatever architecture you're on. If you need an Intel build, change the `pack` script in `package.json` to:
-
-```
-"pack": "electron-builder --mac --x64 --dir"
-```
-
-…or build both with `--universal`. Output will land in `dist/mac/Clawd.app` or `dist/mac-x64/Clawd.app`.
-
----
-
-## What's inside
-
-- **`main.js`** — Electron main process: window, IPC, tray, app-switch watcher.
-- **`preload.js`** — secure bridge between renderer and main.
-- **`agent.js`** — talks to the Claude Agent SDK using your subscription auth.
-- **`tools.js`** — the tools Clawd can call (time, frontmost window, screen capture, window capture, Spotify controls).
-- **`renderer/crab.js`** — pure pixel-art crab. The whole sprite is a `string[]` you can edit by hand; animation is procedural, no sprite sheets.
-- **`renderer/chat.js`** — the chat panel UI.
-- **`build/icon.png`** — generated by `node scripts/generate-icon.js`.
 
 ---
 
 ## Known limitations
 
-- **macOS only.** AppleScript + desktopCapturer + macOS-specific tray behavior.
-- **Not Apple-Developer-ID signed.** First-launch Gatekeeper warning still requires the right-click → Open ritual (only a paid Apple Developer ID `$99 / year` would remove that). The `npm run setup-signing` self-signed cert solves the permission-reset-on-rebuild issue but doesn't satisfy Gatekeeper.
-- **One monitor at a time.** Use the tray submenu to switch — cross-monitor traversal was glitchy on macOS so it's gone.
-- **Spotify auto-play needs a one-time OAuth login.** No developer setup required — just click "Connect Spotify" in the tray menu and authorize once.
-- **Notification reactions are app-switch reactions.** macOS doesn't expose system notifications without private APIs or Full Disk Access against the notification SQLite database. App-switch is the closest analog.
+- **macOS only.** AppleScript + Apple's `desktopCapturer` + macOS-specific tray behavior.
+- **Not Apple-Developer-ID signed.** First-launch Gatekeeper warning still requires right-click → Open. Removing that requires a paid Apple Developer account ($99/yr).
+- **Single monitor at a time.** Use the tray submenu to switch monitors.
+- **Notification reactions are app-switch reactions.** macOS doesn't expose system notifications to apps without private APIs.
 
 ---
 
-## Credits
+## For developers
 
-Built with [Electron](https://www.electronjs.org/), the [Claude Agent SDK](https://docs.claude.com/en/docs/claude-code/sdk), and a small grid of orange pixels.
+Want to hack on Clawd? Clone manually and use the npm scripts:
+
+```bash
+git clone https://github.com/bournechoi4353/ClaudeBuddy.git
+cd ClaudeBuddy
+npm install
+npm run setup-signing   # one-time, sets up the self-signed cert
+npm start               # dev mode (Electron with hot file load)
+npm run pack            # build Clawd.app into dist/mac-arm64/
+```
+
+Project structure:
+
+- `main.js` — Electron main process: windows, tray, IPC, app-switch watcher.
+- `preload.js` — secure bridge between renderer and main.
+- `agent.js` — wraps the Claude Agent SDK with subscription auth.
+- `tools.js` — tools Clawd can call (time, frontmost window, screen/window capture, Spotify).
+- `spotify-auth.js` — OAuth Authorization Code + PKCE flow for Spotify connection.
+- `renderer/crab.js` — the pixel-art crab, animation state machine, accessories.
+- `renderer/chat.js` — chat panel UI.
+- `scripts/generate-icon.js` — pure-JS PNG encoder that renders the crab into `build/icon.png`.
+- `scripts/setup-self-signed.sh` — creates and trusts the self-signed code-signing cert.
+
+See [CLAUDE.md](CLAUDE.md) for architectural notes useful when editing the codebase.

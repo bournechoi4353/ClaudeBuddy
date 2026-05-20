@@ -37,7 +37,31 @@ for (const k of Object.keys(process.env)) {
 
 const agent = require('./agent');
 const spotifyAuth = require('./spotify-auth');
-const { dialog } = require('electron');
+const { dialog, shell } = require('electron');
+const fs = require('fs');
+const os = require('os');
+
+function maybeShowClaudeOnboarding() {
+  const credsPath = path.join(os.homedir(), '.claude', '.credentials.json');
+  if (fs.existsSync(credsPath)) return;
+  const result = dialog.showMessageBoxSync({
+    type: 'info',
+    title: 'Welcome to Clawd',
+    message: 'Set up Claude',
+    detail:
+      "Clawd talks using your Claude Pro/Max subscription — there's no API key to add.\n\n" +
+      "If you don't have Claude Code installed yet:\n" +
+      "   1. Install it from https://claude.com/code\n" +
+      "   2. Open Terminal and run:  claude login\n" +
+      "   3. Sign in with your Claude account\n" +
+      "   4. Quit and relaunch Clawd\n\n" +
+      "Clawd will appear and walk around regardless, but he can't chat until this is done.",
+    buttons: ['Open claude.com/code', 'OK, I will do it later'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (result === 0) shell.openExternal('https://claude.com/code');
+}
 
 let mainWin = null;
 let currentDisplayId = null;
