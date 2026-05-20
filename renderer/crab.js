@@ -402,43 +402,11 @@ function draw() {
   // Force eyes closed while sleeping (overrides blink scheduler).
   const eyesShown = !(eyesClosed || isSleeping);
 
-  // Eye-tracking offsets — when hovered, eyes lean toward the cursor.
-  let eyeOffX = 0, eyeOffY = 0;
-  if (eyesShown && isHovered && lastMouseX >= 0 && SCALE >= 5) {
-    const crabCenterX = drawX + crabW / 2;
-    const crabCenterY = drawY + crabH / 2;
-    const dx = lastMouseX - crabCenterX;
-    const dy = lastMouseY - crabCenterY;
-    const dist = Math.hypot(dx, dy);
-    if (dist > 1) {
-      const maxOff = Math.max(1, Math.floor(SCALE / 3));
-      eyeOffX = Math.round((dx / dist) * maxOff);
-      eyeOffY = Math.round((dy / dist) * maxOff);
-    }
-  }
-
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const ch = CRAB[r][c];
       if (ch === '.') continue;
       if (legRaised(r, c, frame)) continue;
-
-      // Eyes with cursor tracking: paint body color across the cell, then a
-      // smaller pupil shifted toward the cursor inside it.
-      if (ch === 'X' && eyesShown && (eyeOffX !== 0 || eyeOffY !== 0)) {
-        ctx.fillStyle = COLORS.O;
-        ctx.fillRect(drawX + c * SCALE, drawY + r * SCALE, SCALE, SCALE);
-        const pupil = Math.max(2, SCALE - 2);
-        const inset = Math.floor((SCALE - pupil) / 2);
-        ctx.fillStyle = COLORS.X;
-        ctx.fillRect(
-          drawX + c * SCALE + inset + eyeOffX,
-          drawY + r * SCALE + inset + eyeOffY,
-          pupil,
-          pupil
-        );
-        continue;
-      }
 
       let color = COLORS[ch];
       if (!eyesShown && ch === 'X') color = COLORS.O;
