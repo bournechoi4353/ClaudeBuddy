@@ -33,7 +33,17 @@ npm install
 
 This will pull Electron (~180 MB) and the Claude Agent SDK. Takes 1–2 minutes the first time.
 
-### 3. Build the app
+### 3. (Recommended) Set up a self-signed code-signing cert
+
+```
+npm run setup-signing
+```
+
+Creates a self-signed code-signing certificate in your login keychain. Asks once for your keychain password during the trust step. Without this you can still build (electron-builder will fall back to ad-hoc signing), but macOS will forget Screen Recording permission on every rebuild because the ad-hoc signature changes. With a stable self-signed identity, permissions persist across builds.
+
+This does *not* remove the first-launch Gatekeeper warning — that requires a paid Apple Developer ID ($99/yr).
+
+### 4. Build the app
 
 ```
 npm run pack
@@ -41,13 +51,13 @@ npm run pack
 
 This produces `dist/mac-arm64/Clawd.app`. Takes about a minute.
 
-### 4. Move Clawd into Applications
+### 5. Move Clawd into Applications
 
 ```
 cp -R dist/mac-arm64/Clawd.app /Applications/
 ```
 
-### 5. First launch (one-time Gatekeeper step)
+### 6. First launch (one-time Gatekeeper step)
 
 Because Clawd is ad-hoc signed (no Apple Developer ID), macOS will block the first launch.
 
@@ -69,7 +79,7 @@ The first time you ask Clawd to look at your screen, macOS will prompt for **Scr
 4. **Quit Clawd via the tray menu** (the `clawd` text in the top-right menubar → Quit Clawd). This step is required — macOS only honors the new permission after a full restart.
 5. Launch Clawd again. Ask the same question — he should now see your screen.
 
-> **Note:** Because Clawd is ad-hoc signed, the permission may need to be re-granted every time you rebuild. If after a rebuild Clawd says he can't see your screen, repeat the steps above.
+> **Note:** If you ran `npm run setup-signing` (step 3), permissions persist across rebuilds. If you skipped that step, you'll need to re-grant after every `npm run pack` since ad-hoc signatures change each build.
 
 ---
 
@@ -89,7 +99,7 @@ Click on Clawd and a small speech-bubble panel opens above him. Type, hit **Ente
 - "read my chrome tab", "look at slack", "what does my email say"
 - "what's playing" — Clawd puts on headphones to check Spotify
 - "pause", "skip", "previous track"
-- "play [song or artist name]" — plays the first matching track if you've set up Spotify API credentials (see below); otherwise opens the search page
+- "play [song or artist name]" — plays the first matching track if you've connected Spotify (see below); otherwise Clawd will ask you to connect
 
 Mundane questions ("what's 2+2") just stream back without any tool use.
 
@@ -102,33 +112,19 @@ Click `clawd` in the macOS menubar (top-right area, near time/wifi). Options:
 - **Launch at login** — checkbox; toggle on to have Clawd start every time you log in to your Mac
 - **Quit Clawd**
 
-### Spotify auto-play setup (optional)
+### Spotify auto-play (optional)
 
-Out of the box, "play \<song\>" opens Spotify's search page and you click to play. To make Clawd actually play the first result automatically:
+Out of the box, Clawd doesn't have Spotify auto-play wired up. To enable it:
 
-1. Go to <https://developer.spotify.com/dashboard>, log in with your Spotify account, click **Create app**.
-2. Fill in the form:
-   - **App name / description:** anything.
-   - **Redirect URI:** `http://127.0.0.1:8888/callback` — type it into the field then **click the Add button next to the field** so it appears as a chip below. (Spotify rejects the form if you don't actually click Add. We never use this URL — it's just required by the form.)
-   - **Which API/SDKs:** check **Web API** only.
-   - Agree to the terms, click **Save**.
-3. On the app's dashboard page, copy the **Client ID**. Click **View client secret** to reveal the secret and copy that too.
-4. Open Clawd's prefs file in TextEdit:
-   ```
-   open -e ~/Library/Application\ Support/Clawd/prefs.json
-   ```
-   Add the two keys (keep any existing keys like `scale`):
-   ```json
-   {
-     "scale": 6,
-     "spotifyClientId": "your_client_id",
-     "spotifyClientSecret": "your_client_secret"
-   }
-   ```
-   Save with ⌘+S.
-5. **No relaunch needed.** Clawd re-reads the prefs file every 5 seconds. Ask "play hello by adele" and it should play immediately.
+1. Click the **`clawd`** label in your macOS menubar (top-right area).
+2. Pick **Connect Spotify…**
+3. Your browser opens to a Spotify authorization page. Log in with your Spotify account if needed, click **Agree**.
+4. Browser shows "clawd is connected to spotify" — you can close the tab.
+5. Done. The menu item flips to **Disconnect Spotify** for whenever you want to revoke.
 
-The credentials only let Clawd search Spotify's public catalog via the client-credentials flow — they don't access your account, playlists, or playback history. Actual playback is still triggered through the local Spotify desktop app via AppleScript using the track URI returned by the search.
+That's it. No developer dashboard, no API credentials, no editing config files. Clawd uses Spotify's OAuth PKCE flow — only your account is involved, no shared infrastructure.
+
+After connecting, ask Clawd things like "play hello by adele" or "play some daft punk". He searches Spotify and tells your local desktop Spotify to play the first result. The Spotify window stays hidden (won't steal focus while you're working).
 
 ### When Clawd sleeps
 
@@ -178,9 +174,9 @@ The `npm run pack` script defaults to whatever architecture you're on. If you ne
 ## Known limitations
 
 - **macOS only.** AppleScript + desktopCapturer + macOS-specific tray behavior.
-- **Ad-hoc signed.** Every rebuild gets a new code-signing hash, so macOS may forget Screen Recording permission across rebuilds. A proper Developer ID signature (`$99 / year` Apple Developer Program) would fix this.
+- **Not Apple-Developer-ID signed.** First-launch Gatekeeper warning still requires the right-click → Open ritual (only a paid Apple Developer ID `$99 / year` would remove that). The `npm run setup-signing` self-signed cert solves the permission-reset-on-rebuild issue but doesn't satisfy Gatekeeper.
 - **One monitor at a time.** Use the tray submenu to switch — cross-monitor traversal was glitchy on macOS so it's gone.
-- **Spotify auto-play needs API credentials.** Free but requires creating a Spotify developer app (see setup above). Without it, "play \<song\>" falls back to opening the search page.
+- **Spotify auto-play needs a one-time OAuth login.** No developer setup required — just click "Connect Spotify" in the tray menu and authorize once.
 - **Notification reactions are app-switch reactions.** macOS doesn't expose system notifications without private APIs or Full Disk Access against the notification SQLite database. App-switch is the closest analog.
 
 ---

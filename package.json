@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --mac --dir",
-    "dist": "electron-builder --mac"
+    "dist": "electron-builder --mac",
+    "setup-signing": "bash scripts/setup-self-signed.sh"
   },
   "build": {
     "appId": "dev.clawd.app",
@@ -16,6 +17,7 @@
       "preload.js",
       "agent.js",
       "tools.js",
+      "spotify-auth.js",
       "renderer/**/*",
       "package.json"
     ],
@@ -27,6 +29,7 @@
       "category": "public.app-category.utilities",
       "target": "dir",
       "icon": "build/icon.png",
+      "identity": "Clawd Self-Signed",
       "extendInfo": {
         "LSUIElement": 1
       }

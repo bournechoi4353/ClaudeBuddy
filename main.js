@@ -36,6 +36,8 @@ for (const k of Object.keys(process.env)) {
 }
 
 const agent = require('./agent');
+const spotifyAuth = require('./spotify-auth');
+const { dialog } = require('electron');
 
 let mainWin = null;
 let currentDisplayId = null;
@@ -170,9 +172,46 @@ function setScale(scale) {
   rebuildTrayMenu();
 }
 
+let spotifyConnecting = false;
+
+async function connectSpotify() {
+  if (spotifyConnecting) return;
+  spotifyConnecting = true;
+  rebuildTrayMenu();
+  try {
+    const tokens = await spotifyAuth.connect();
+    prefs.spotifyRefreshToken = tokens.refresh_token;
+    savePrefs(prefs);
+    dialog.showMessageBox({
+      type: 'info',
+      message: 'Clawd is connected to Spotify',
+      detail: "Now say things like “play hello by adele”.",
+      buttons: ['OK'],
+    });
+  } catch (err) {
+    dialog.showMessageBox({
+      type: 'error',
+      message: 'Spotify connection failed',
+      detail: err.message || String(err),
+      buttons: ['OK'],
+    });
+  } finally {
+    spotifyConnecting = false;
+    rebuildTrayMenu();
+  }
+}
+
+function disconnectSpotify() {
+  delete prefs.spotifyRefreshToken;
+  savePrefs(prefs);
+  spotifyAuth.clearCache();
+  rebuildTrayMenu();
+}
+
 function rebuildTrayMenu() {
   const launchAtLogin = app.getLoginItemSettings().openAtLogin;
   const monitorItems = buildMonitorSubmenu();
+  const spotifyConnected = !!prefs.spotifyRefreshToken;
   const menu = Menu.buildFromTemplate([
     { label: 'Reset conversation', click: () => agent.reset() },
     { label: 'Size', submenu: buildSizeSubmenu() },
@@ -181,6 +220,12 @@ function rebuildTrayMenu() {
       submenu: monitorItems,
       enabled: monitorItems.length > 1,
     },
+    { type: 'separator' },
+    spotifyConnecting
+      ? { label: 'Connecting Spotify…', enabled: false }
+      : spotifyConnected
+      ? { label: 'Disconnect Spotify', click: disconnectSpotify }
+      : { label: 'Connect Spotify…', click: connectSpotify },
     {
       label: 'Launch at login',
       type: 'checkbox',

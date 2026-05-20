@@ -76,7 +76,7 @@ The `see_screen` and `see_window` tools call `assertScreenPermission()` first us
 `~/Library/Application Support/Clawd/prefs.json`. Currently stores:
 
 - `scale` — number, set by tray "Size →" submenu, hot-reloaded via IPC.
-- `spotifyClientId` / `spotifyClientSecret` — optional, set by hand. Enables `spotify_play` to auto-play search results via the Spotify Web API (client credentials flow). Without them, `spotify_play` returns an error message; `spotify_search` (AppleScript open-on-search-page) is the fallback. The credentials only need read access to the public catalog, not user data.
+- `spotifyRefreshToken` — written by the tray "Connect Spotify…" flow ([spotify-auth.js](spotify-auth.js)). Used by `spotify_play` to mint short-lived access tokens against the user's own Spotify account. Cleared by "Disconnect Spotify".
 
 Add new keys here for any future persistent setting. `main.js` has `loadPrefs`/`savePrefs`; `tools.js` has its own `getPrefs` with a 5s cache so hand-edits to the file get picked up without restart.
 
@@ -111,7 +111,7 @@ tccutil reset ScreenCapture dev.clawd.app
 - **Single window spanning all monitors via union bounding box.** macOS silently clips transparent + alwaysOnTop windows to the display they were created on, so Clawd was invisible past monitor 1. The segments-based per-monitor Y fix didn't help because the window itself was clipped.
 - **Multi-window architecture (one window per monitor, IPC handoff).** Worked in principle but produced glitching with frozen ghost instances at handoff time, and chat lifecycle across windows was awkward. Reverted to single window with a "Move to monitor →" tray picker.
 - **Real notification reactions via the macOS notification SQLite DB.** Requires Full Disk Access and is fragile across OS versions. We use frontmost-app polling as a substitute — Clawd hops when the user switches apps.
-- ~~**Auto-play search results in Spotify.** Requires Spotify Web API + OAuth.~~ Now implemented: `spotify_play` uses Spotify Web API client-credentials with user-supplied credentials in prefs.json, then plays the resulting URI via AppleScript.
+- ~~**Auto-play search results in Spotify.**~~ Implemented via Spotify OAuth Authorization Code + PKCE. The flow: tray "Connect Spotify…" → local HTTP server on 127.0.0.1:8888 → browser redirect to Spotify → user authorizes → server captures code → token exchange → refresh_token persisted in prefs.json. Search uses the user's own Spotify quota. Playback still goes through local Spotify desktop app via AppleScript. The client_id is embedded in [spotify-auth.js](spotify-auth.js); PKCE means no client secret is needed.
 
 ## Conventions
 

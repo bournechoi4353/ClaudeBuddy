@@ -4,8 +4,30 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { desktopCapturer, screen, BrowserWindow, systemPreferences, app: electronApp } = require('electron');
 const { z } = require('zod');
+
+function pickLocalSpotifyDevice(devices) {
+  if (!devices || devices.length === 0) return null;
+  // 1. Currently active Computer (most reliable signal it's the one playing audio here).
+  const activeComputer = devices.find((d) => d.is_active && d.type === 'Computer');
+  if (activeComputer) return activeComputer;
+  // 2. Match by hostname — Spotify desktop names itself after macOS's computer name.
+  const norm = (s) => (s || '').toLowerCase().replace(/[-_.]/g, ' ').replace(/\s+/g, ' ').trim().replace(/ local$/, '');
+  const hn = norm(os.hostname());
+  const byName = devices.find((d) => {
+    if (d.type !== 'Computer') return false;
+    const dn = norm(d.name);
+    return dn && (dn === hn || dn.includes(hn) || hn.includes(dn));
+  });
+  if (byName) return byName;
+  // 3. Any Computer device.
+  const anyComputer = devices.find((d) => d.type === 'Computer');
+  if (anyComputer) return anyComputer;
+  // 4. Last resort — first device of any type.
+  return devices[0];
+}
 
 // Re-read prefs every few seconds so the user can drop in Spotify credentials
 // without restarting Clawd.
@@ -207,39 +229,35 @@ async function spotifyPlayUriHandler({ uri }) {
     };
   }
   try {
-    await osascriptRun(`tell application "Spotify"
-activate
-play track "${uri.replace(/"/g, '')}"
-end tell`);
+    await osascriptRun(`if application "Spotify" is not running then
+tell application "Spotify" to launch
+set ready to false
+repeat 50 times
+try
+tell application "Spotify" to get player state
+set ready to true
+exit repeat
+end try
+try
+tell application "System Events" to set visible of process "Spotify" to false
+end try
+delay 0.1
+end repeat
+if not ready then error "spotify did not become responsive within 5 seconds"
+end if
+tell application "System Events" to set visible of process "Spotify" to false
+tell application "Spotify" to play track "${uri.replace(/"/g, '')}"
+tell application "System Events" to set visible of process "Spotify" to false`);
     return { content: [{ type: 'text', text: 'playing ' + uri }] };
   } catch (err) {
     return { content: [{ type: 'text', text: 'spotify error: ' + err.message }], isError: true };
   }
 }
 
-// ---- Spotify Web API (client credentials) for auto-play of search results.
-// Only used by spotify_play; spotify_search stays AppleScript-only.
+// ---- Spotify Web API via per-user OAuth (PKCE).
+// User connects once through the menubar; refresh_token lives in prefs.json.
 
-let _spotifyToken = null;
-let _spotifyTokenExpires = 0;
-
-async function getSpotifyToken(clientId, clientSecret) {
-  if (_spotifyToken && Date.now() < _spotifyTokenExpires) return _spotifyToken;
-  const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${auth}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: 'grant_type=client_credentials',
-  });
-  if (!res.ok) throw new Error(`spotify auth failed (${res.status})`);
-  const data = await res.json();
-  _spotifyToken = data.access_token;
-  _spotifyTokenExpires = Date.now() + (data.expires_in * 1000) - 60000;
-  return _spotifyToken;
-}
+const spotifyAuth = require('./spotify-auth');
 
 async function spotifyApiSearchTrack(query, token) {
   const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=1`;
@@ -249,39 +267,177 @@ async function spotifyApiSearchTrack(query, token) {
   return data.tracks && data.tracks.items && data.tracks.items[0];
 }
 
+async function spotifyGetDevices(token) {
+  const res = await fetch('https://api.spotify.com/v1/me/player/devices', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error('NEEDS_RECONNECT');
+  if (res.status === 403) throw new Error('NEEDS_RECONNECT_SCOPES');
+  if (!res.ok) throw new Error(`devices ${res.status}`);
+  const data = await res.json();
+  return data.devices || [];
+}
+
+async function spotifyApiPlay(token, trackUri, deviceId) {
+  const qs = deviceId ? `?device_id=${deviceId}` : '';
+  const res = await fetch(`https://api.spotify.com/v1/me/player/play${qs}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uris: [trackUri] }),
+  });
+  if (res.status === 401) throw new Error('NEEDS_RECONNECT');
+  if (res.status === 403) {
+    const t = await res.text();
+    if (/premium/i.test(t)) throw new Error('PREMIUM_REQUIRED');
+    throw new Error('NEEDS_RECONNECT_SCOPES');
+  }
+  if (res.status === 404) throw new Error('NO_ACTIVE_DEVICE');
+  if (!res.ok && res.status !== 204) {
+    const t = await res.text();
+    throw new Error(`play ${res.status}: ${t}`);
+  }
+}
+
+// Cold-start helper: launch Spotify desktop without surfacing. Aggressively
+// hides during startup, polls until it can answer AppleScript so we know the
+// app is fully initialized (and therefore registered as a Spotify Connect
+// device the Web API can target).
+async function ensureSpotifyRunningHidden() {
+  await osascriptRun(`if application "Spotify" is not running then
+tell application "Spotify" to launch
+set ready to false
+repeat 50 times
+try
+tell application "Spotify" to get player state
+set ready to true
+exit repeat
+end try
+try
+tell application "System Events" to set visible of process "Spotify" to false
+end try
+delay 0.1
+end repeat
+if not ready then error "spotify did not become responsive within 5 seconds"
+end if
+try
+tell application "System Events" to set visible of process "Spotify" to false
+end try`);
+}
+
+// AppleScript fallback for users without Premium / new scopes / network access.
+// Captures whichever app the user was in, plays via Spotify desktop's AppleScript
+// API, then restores focus to the original app — even if Spotify briefly grabs
+// the foreground, the user gets snapped back to their work within milliseconds.
+async function playViaAppleScript(uri) {
+  // Every step is wrapped in try blocks so a failure in focus capture or
+  // hiding never prevents the actual play command from running.
+  return osascriptRun(`set frontProcName to ""
+try
+tell application "System Events" to set frontProcName to name of (first application process whose frontmost is true)
+end try
+if application "Spotify" is not running then
+tell application "Spotify" to launch
+set ready to false
+repeat 50 times
+try
+tell application "Spotify" to get player state
+set ready to true
+exit repeat
+end try
+try
+tell application "System Events" to set visible of process "Spotify" to false
+end try
+delay 0.1
+end repeat
+if not ready then error "spotify did not become responsive within 5 seconds"
+end if
+try
+tell application "System Events" to set visible of process "Spotify" to false
+end try
+tell application "Spotify" to play track "${uri.replace(/"/g, '')}"
+try
+tell application "System Events" to set visible of process "Spotify" to false
+end try
+try
+if frontProcName is not "" then
+tell application "System Events" to set frontmost of process frontProcName to true
+end if
+end try`);
+}
+
+function persistRotatedRefreshToken(newRefresh) {
+  try {
+    const fresh = { ...getPrefs(), spotifyRefreshToken: newRefresh };
+    const p = path.join(electronApp.getPath('userData'), 'prefs.json');
+    fs.writeFileSync(p, JSON.stringify(fresh, null, 2));
+    _cachedPrefs = fresh;
+    _cachedPrefsAt = Date.now();
+  } catch (_) {}
+}
+
 async function spotifyPlayHandler({ query }) {
   const prefs = getPrefs();
-  const clientId = prefs.spotifyClientId;
-  const clientSecret = prefs.spotifyClientSecret;
-  if (!clientId || !clientSecret) {
+  const refreshToken = prefs.spotifyRefreshToken;
+  if (!refreshToken) {
     return {
       content: [
         {
           type: 'text',
           text:
-            'spotify auto-play needs api credentials. add spotifyClientId and spotifyClientSecret to ~/Library/Application Support/Clawd/prefs.json. get them free at developer.spotify.com (create an app, copy client id + secret). i can use spotify_search to open the search page for you instead.',
+            "spotify isn't connected. tell the user to click the clawd label in their menubar and pick 'Connect Spotify' — one-time login, no setup.",
         },
       ],
       isError: true,
     };
   }
+  // Step 1: search for the track. Search works for both Free and Premium accounts.
+  let track;
+  let token;
   try {
-    const token = await getSpotifyToken(clientId, clientSecret);
-    const track = await spotifyApiSearchTrack(query, token);
-    if (!track) {
-      return { content: [{ type: 'text', text: `no spotify results for "${query}"` }] };
-    }
-    await osascriptRun(`tell application "Spotify"
-activate
-play track "${track.uri}"
-end tell`);
-    const artists = (track.artists || []).map((a) => a.name).join(', ');
-    return {
-      content: [{ type: 'text', text: `playing "${track.name}"${artists ? ' by ' + artists : ''}` }],
-    };
+    token = await spotifyAuth.getAccessToken(refreshToken, persistRotatedRefreshToken);
+    track = await spotifyApiSearchTrack(query, token);
   } catch (err) {
-    return { content: [{ type: 'text', text: 'spotify error: ' + (err.message || err) }], isError: true };
+    return { content: [{ type: 'text', text: 'spotify search failed: ' + (err.message || err) }], isError: true };
   }
+  if (!track) {
+    return { content: [{ type: 'text', text: `no spotify results for "${query}"` }] };
+  }
+
+  // Step 2: try the Web API play first (zero window flash — Premium-only).
+  let apiPlayed = false;
+  try {
+    await ensureSpotifyRunningHidden();
+    let devices = await spotifyGetDevices(token);
+    let device = pickLocalSpotifyDevice(devices);
+    if (!device) {
+      await new Promise((r) => setTimeout(r, 800));
+      devices = await spotifyGetDevices(token);
+      device = pickLocalSpotifyDevice(devices);
+    }
+    if (!device) throw new Error('no device after launch');
+    await spotifyApiPlay(token, track.uri, device.id);
+    apiPlayed = true;
+  } catch (apiErr) {
+    // Common reasons we fall through: PREMIUM_REQUIRED (Free account),
+    // NEEDS_RECONNECT_SCOPES (user connected before we added playback scopes),
+    // NEEDS_RECONNECT (token revoked), network issue. Try the AppleScript path
+    // instead — works for everyone but the Spotify window may briefly flicker.
+  }
+
+  // Step 3: AppleScript fallback. Hides Spotify and restores focus to the user's
+  // previous app, so even if Spotify surfaces, the user isn't yanked out of their work.
+  if (!apiPlayed) {
+    try {
+      await playViaAppleScript(track.uri);
+    } catch (err) {
+      return { content: [{ type: 'text', text: 'spotify error: ' + (err.message || err) }], isError: true };
+    }
+  }
+
+  const artists = (track.artists || []).map((a) => a.name).join(', ');
+  return {
+    content: [{ type: 'text', text: `playing "${track.name}"${artists ? ' by ' + artists : ''}` }],
+  };
 }
 
 async function spotifySearchHandler({ query }) {
