@@ -21,8 +21,8 @@ Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no
 ### 1. Clone the repo
 
 ```
-git clone https://github.com/<your-username>/clawd.git
-cd clawd
+git clone https://github.com/bournechoi4353/ClaudeBuddy.git
+cd ClaudeBuddy
 ```
 
 ### 2. Install dependencies
