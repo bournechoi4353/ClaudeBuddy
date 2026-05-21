@@ -105,50 +105,45 @@ function assertScreenPermission() {
   }
 }
 
-async function captureScreenPng() {
+async function captureAllScreensPng() {
   assertScreenPermission();
-  // Briefly hide Clawd so he doesn't appear in his own screenshot.
+  // Briefly hide every Clawd window so he doesn't appear in his own screenshots.
   const wins = BrowserWindow.getAllWindows();
-  const mainWin = wins[0];
-  const prevOpacity = mainWin ? mainWin.getOpacity() : 1;
-  if (mainWin) mainWin.setOpacity(0);
+  const snap = wins.map((w) => ({ w, prev: w.getOpacity() }));
+  snap.forEach(({ w }) => w.setOpacity(0));
   await new Promise((r) => setTimeout(r, 80));
 
   try {
-    const display = screen.getPrimaryDisplay();
-    const { width, height } = display.size;
-    // Claude vision is most effective at up to 1568px on the long edge; the
-    // API downscales anything larger. Capturing at this size gives us much
-    // sharper text (Chrome web content was illegible at 1280).
-    const maxDim = 1568;
-    const scale = Math.min(1, maxDim / Math.max(width, height));
-    const tw = Math.max(1, Math.floor(width * scale));
-    const th = Math.max(1, Math.floor(height * scale));
-
+    // Capture every connected display. 1568 max on the long edge — Claude
+    // vision's sweet spot.
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
-      thumbnailSize: { width: tw, height: th },
+      thumbnailSize: { width: 1568, height: 1568 },
     });
-    const primary = sources[0];
-    if (!primary) throw new Error('no screen source available');
-    return primary.thumbnail.toPNG();
+    if (!sources || sources.length === 0) throw new Error('no screen sources available');
+    return sources.map((s) => ({ name: s.name || 'screen', png: s.thumbnail.toPNG() }));
   } finally {
-    if (mainWin) mainWin.setOpacity(prevOpacity);
+    snap.forEach(({ w, prev }) => w.setOpacity(prev));
   }
 }
 
 async function seeScreenHandler() {
   try {
-    const png = await captureScreenPng();
-    return {
-      content: [
-        {
-          type: 'image',
-          data: png.toString('base64'),
-          mimeType: 'image/png',
-        },
-      ],
-    };
+    const screens = await captureAllScreensPng();
+    const content = [];
+    if (screens.length > 1) {
+      content.push({
+        type: 'text',
+        text: `The user has ${screens.length} displays. Here are all of them:`,
+      });
+    }
+    screens.forEach((s, i) => {
+      if (screens.length > 1) {
+        content.push({ type: 'text', text: `--- ${s.name} (display ${i + 1} of ${screens.length}) ---` });
+      }
+      content.push({ type: 'image', data: s.png.toString('base64'), mimeType: 'image/png' });
+    });
+    return { content };
   } catch (err) {
     return {
       content: [{ type: 'text', text: 'could not capture screen: ' + err.message }],
@@ -736,55 +731,168 @@ function stripHtmlToText(html) {
     .trim();
 }
 
-async function readBrowserTabHandler({ browser }) {
+async function listAllBrowserTabs(appName) {
+  const script = appName === 'Safari'
+    ? `tell application "Safari"
+set output to ""
+repeat with w in windows
+try
+repeat with t in tabs of w
+set output to output & (URL of t) & "|||" & (name of t) & linefeed
+end repeat
+end try
+end repeat
+return output
+end tell`
+    : `tell application "Google Chrome"
+set output to ""
+repeat with w in windows
+try
+repeat with t in tabs of w
+set output to output & (URL of t) & "|||" & (title of t) & linefeed
+end repeat
+end try
+end repeat
+return output
+end tell`;
+  const out = await osascriptRun(script);
+  return out
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const idx = line.indexOf('|||');
+      if (idx < 0) return { url: line, title: '' };
+      return { url: line.slice(0, idx), title: line.slice(idx + 3) };
+    });
+}
+
+async function readBrowserTabHandler({ query, browser }) {
   const which = (browser || '').toLowerCase();
   let appName = 'Google Chrome';
   if (which.includes('safari')) appName = 'Safari';
   await ensureAppRunning(appName);
 
-  let getTabScript;
-  if (appName === 'Safari') {
-    getTabScript = `tell application "Safari"
-return (URL of current tab of front window) & "|||" & (name of current tab of front window)
-end tell`;
-  } else {
-    getTabScript = `tell application "Google Chrome"
-return (URL of active tab of front window) & "|||" & (title of active tab of front window)
-end tell`;
-  }
-
-  let url, title;
+  let tabs;
   try {
-    const out = await osascriptRun(getTabScript);
-    [url, title] = out.split('|||');
+    tabs = await listAllBrowserTabs(appName);
   } catch (err) {
     return { content: [{ type: 'text', text: `${appName} has no open windows — open a tab first.` }], isError: true };
   }
-  if (!url) return { content: [{ type: 'text', text: 'no active tab found' }], isError: true };
+  if (!tabs.length) {
+    return { content: [{ type: 'text', text: `${appName} has no open tabs` }], isError: true };
+  }
 
+  // Pick the tab to read.
+  let chosen;
+  let preFetchedText = null; // populated if the deep search finds a content match
+  if (query) {
+    const q = query.toLowerCase();
+    chosen =
+      tabs.find((t) => t.title.toLowerCase().includes(q)) ||
+      tabs.find((t) => t.url.toLowerCase().includes(q));
+
+    // Content-search fallback: URL/title didn't match — try fetching each tab's
+    // HTML in parallel and looking for the query inside the page body. Capped
+    // at the first 15 tabs with a 4s timeout per tab so it doesn't hang.
+    if (!chosen) {
+      const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Clawd/0.1';
+      const probeOne = async (tab) => {
+        try {
+          const ctrl = new AbortController();
+          const to = setTimeout(() => ctrl.abort(), 4000);
+          const res = await fetch(tab.url, { signal: ctrl.signal, redirect: 'follow', headers: { 'User-Agent': ua } });
+          clearTimeout(to);
+          if (!res.ok) return null;
+          const html = await res.text();
+          const text = stripHtmlToText(html);
+          if (text.toLowerCase().includes(q)) return { tab, text };
+          return null;
+        } catch {
+          return null;
+        }
+      };
+      const results = await Promise.all(tabs.slice(0, 15).map(probeOne));
+      const hit = results.find((r) => r !== null);
+      if (hit) {
+        chosen = hit.tab;
+        preFetchedText = hit.text;
+      }
+    }
+
+    if (!chosen) {
+      const list = tabs.slice(0, 15).map((t, i) => `  ${i + 1}. ${t.title || '(untitled)'} — ${t.url}`).join('\n');
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `No ${appName} tab matched "${query}" by URL, title, or page content. Open tabs:\n${list}\n\nTry calling read_browser_tab with a different query, or ask the user to switch to the right tab.`,
+          },
+        ],
+      };
+    }
+  } else {
+    // No query — default to the active tab of front window.
+    const activeScript = appName === 'Safari'
+      ? `tell application "Safari" to return (URL of current tab of front window) & "|||" & (name of current tab of front window)`
+      : `tell application "Google Chrome" to return (URL of active tab of front window) & "|||" & (title of active tab of front window)`;
+    try {
+      const out = await osascriptRun(activeScript);
+      const idx = out.indexOf('|||');
+      chosen = idx > -1 ? { url: out.slice(0, idx), title: out.slice(idx + 3) } : tabs[0];
+    } catch {
+      chosen = tabs[0];
+    }
+  }
+
+  // If content search already pulled the text, use it directly.
+  if (preFetchedText) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `URL: ${chosen.url}\nTitle: ${chosen.title || '(no title)'}\n\nContent:\n${preFetchedText.slice(0, 5000)}`,
+        },
+      ],
+    };
+  }
+
+  // Fetch and extract.
   try {
-    const res = await fetch(url, {
+    const res = await fetch(chosen.url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Clawd/0.1' },
       redirect: 'follow',
     });
     if (!res.ok) {
       return {
-        content: [{ type: 'text', text: `URL: ${url}\nTitle: ${title || '(no title)'}\n\nServer returned ${res.status} — page is probably auth-protected; try see_window("${appName.toLowerCase()}") instead.` }],
+        content: [
+          {
+            type: 'text',
+            text: `URL: ${chosen.url}\nTitle: ${chosen.title || '(no title)'}\n\nServer returned ${res.status} — page is probably auth-protected; try see_window("${appName.toLowerCase()}") instead.`,
+          },
+        ],
       };
     }
     const html = await res.text();
     const text = stripHtmlToText(html).slice(0, 5000);
     if (text.length < 50) {
       return {
-        content: [{ type: 'text', text: `URL: ${url}\nTitle: ${title || '(no title)'}\n\nPage looks empty (likely a single-page app that renders content via JavaScript). Use see_window("${appName.toLowerCase()}") instead.` }],
+        content: [
+          {
+            type: 'text',
+            text: `URL: ${chosen.url}\nTitle: ${chosen.title || '(no title)'}\n\nPage looks empty (likely a single-page app that renders via JavaScript). Use see_window("${appName.toLowerCase()}") instead.`,
+          },
+        ],
       };
     }
     return {
-      content: [{ type: 'text', text: `URL: ${url}\nTitle: ${title || '(no title)'}\n\nContent:\n${text}` }],
+      content: [
+        { type: 'text', text: `URL: ${chosen.url}\nTitle: ${chosen.title || '(no title)'}\n\nContent:\n${text}` },
+      ],
     };
   } catch (err) {
     return {
-      content: [{ type: 'text', text: `Could not fetch ${url}: ${err.message}. Try see_window("${appName.toLowerCase()}") for a screenshot fallback.` }],
+      content: [{ type: 'text', text: `Could not fetch ${chosen.url}: ${err.message}. Try see_window("${appName.toLowerCase()}") for a screenshot fallback.` }],
       isError: true,
     };
   }
@@ -847,8 +955,11 @@ async function buildServer(sdk) {
       ),
       tool(
         'read_browser_tab',
-        'Reads the active tab of Google Chrome (or Safari) by fetching the actual page HTML and extracting clean text. Far more accurate than reading screenshots for web content. PREFER this over see_window/see_screen whenever the user asks about a website, browser tab, "google", "the website", "the page", etc. Falls back gracefully if the page is empty (SPA) or auth-protected.',
-        { browser: z.string().optional().describe('"chrome" (default) or "safari"') },
+        'Reads a tab of Google Chrome (or Safari) by fetching its page HTML and extracting clean text. PREFER this over see_window/see_screen whenever the user asks about a website, browser tab, "google", "the website", "the page", etc. Pass a `query` substring (e.g. "clawdbuddy", "github", "youtube") to find a specific tab across ALL windows — even tabs in background windows or other monitors. With no query, reads the active tab of the front window. Returns the list of all tabs if nothing matches the query so you can retry.',
+        {
+          query: z.string().optional().describe('substring of the target tab\'s title or URL — e.g. "clawdbuddy", "github". omit to read the active tab.'),
+          browser: z.string().optional().describe('"chrome" (default) or "safari"'),
+        },
         readBrowserTabHandler
       ),
       tool(
