@@ -477,7 +477,11 @@ open location "spotify:search:${q}"`);
 
 async function calendarHandler({ days }) {
   const dayCount = Math.max(1, Math.min(7, days || 1));
-  const script = `set output to ""
+  const script = `if application "Calendar" is not running then
+tell application "Calendar" to launch
+delay 1.5
+end if
+set output to ""
 tell application "Calendar"
 set startDate to current date
 set endDate to startDate + (${dayCount} * 24 * 60 * 60)
@@ -525,7 +529,11 @@ set hours of ${varName} to ${d.getHours()}
 set minutes of ${varName} to ${d.getMinutes()}
 set seconds of ${varName} to 0`;
   const calSelector = calName ? `calendar "${calName}"` : 'calendar 1';
-  const script = `tell application "Calendar"
+  const script = `if application "Calendar" is not running then
+tell application "Calendar" to launch
+delay 1.5
+end if
+tell application "Calendar"
 ${setDate('startDate', startDate)}
 ${setDate('endDate', endDate)}
 tell ${calSelector}
@@ -580,7 +588,11 @@ async function weatherHandler() {
 
 async function getNotesHandler({ limit }) {
   const n = Math.max(1, Math.min(20, limit || 5));
-  const script = `set output to ""
+  const script = `if application "Notes" is not running then
+tell application "Notes" to launch
+delay 1.5
+end if
+set output to ""
 tell application "Notes"
 set theNotes to notes
 set countNotes to count of theNotes
@@ -606,7 +618,11 @@ async function saveNoteHandler({ title, body }) {
   }
   const safeTitle = title.replace(/"/g, '\\"');
   const safeBody = body.replace(/"/g, '\\"').replace(/\n/g, '<br>');
-  const script = `tell application "Notes"
+  const script = `if application "Notes" is not running then
+tell application "Notes" to launch
+delay 1.5
+end if
+tell application "Notes"
 make new note with properties {name:"${safeTitle}", body:"<h1>${safeTitle}</h1>${safeBody}"}
 end tell`;
   try {
