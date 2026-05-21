@@ -59,6 +59,34 @@ function osascriptRun(script) {
   });
 }
 
+async function isAppRunning(name) {
+  try {
+    const r = await osascriptRun(`tell application "System Events" to count (every process whose name is "${name}")`);
+    return parseInt(r, 10) > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Robust app launcher: uses LaunchServices via `open -a` (more reliable than
+// AppleScript's "tell application X to launch", which sometimes races),
+// then polls until the app's process exists. Background flag `-g` keeps focus
+// where it was.
+async function ensureAppRunning(appName, maxWaitMs = 6000) {
+  if (await isAppRunning(appName)) return true;
+  await new Promise((resolve) => {
+    const p = spawn('open', ['-a', appName, '-g']);
+    p.on('close', () => resolve());
+    p.on('error', () => resolve());
+  });
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    if (await isAppRunning(appName)) return true;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return false;
+}
+
 async function nowHandler() {
   const d = new Date();
   const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -476,12 +504,9 @@ open location "spotify:search:${q}"`);
 // ---- Calendar (macOS Calendar.app via AppleScript) ----
 
 async function calendarHandler({ days }) {
+  await ensureAppRunning('Calendar');
   const dayCount = Math.max(1, Math.min(7, days || 1));
-  const script = `if application "Calendar" is not running then
-tell application "Calendar" to launch
-delay 1.5
-end if
-set output to ""
+  const script = `set output to ""
 tell application "Calendar"
 set startDate to current date
 set endDate to startDate + (${dayCount} * 24 * 60 * 60)
@@ -529,11 +554,8 @@ set hours of ${varName} to ${d.getHours()}
 set minutes of ${varName} to ${d.getMinutes()}
 set seconds of ${varName} to 0`;
   const calSelector = calName ? `calendar "${calName}"` : 'calendar 1';
-  const script = `if application "Calendar" is not running then
-tell application "Calendar" to launch
-delay 1.5
-end if
-tell application "Calendar"
+  await ensureAppRunning('Calendar');
+  const script = `tell application "Calendar"
 ${setDate('startDate', startDate)}
 ${setDate('endDate', endDate)}
 tell ${calSelector}
@@ -587,12 +609,9 @@ async function weatherHandler() {
 // ---- Notes (macOS Notes.app via AppleScript) ----
 
 async function getNotesHandler({ limit }) {
+  await ensureAppRunning('Notes');
   const n = Math.max(1, Math.min(20, limit || 5));
-  const script = `if application "Notes" is not running then
-tell application "Notes" to launch
-delay 1.5
-end if
-set output to ""
+  const script = `set output to ""
 tell application "Notes"
 set theNotes to notes
 set countNotes to count of theNotes
@@ -618,11 +637,8 @@ async function saveNoteHandler({ title, body }) {
   }
   const safeTitle = title.replace(/"/g, '\\"');
   const safeBody = body.replace(/"/g, '\\"').replace(/\n/g, '<br>');
-  const script = `if application "Notes" is not running then
-tell application "Notes" to launch
-delay 1.5
-end if
-tell application "Notes"
+  await ensureAppRunning('Notes');
+  const script = `tell application "Notes"
 make new note with properties {name:"${safeTitle}", body:"<h1>${safeTitle}</h1>${safeBody}"}
 end tell`;
   try {
@@ -694,6 +710,86 @@ async function cancelTimerHandler({ id }) {
   return { content: [{ type: 'text', text: `cancelled timer "${target.label}"` }] };
 }
 
+// ---- Browser tab reader (Chrome / Safari) ----
+// Bypasses screenshot OCR entirely: gets the active tab's URL via AppleScript,
+// fetches the page directly, strips HTML to readable text. Much more reliable
+// than reading pixels for web content.
+
+function stripHtmlToText(html) {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(br|p|div|li|tr|h[1-6])[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function readBrowserTabHandler({ browser }) {
+  const which = (browser || '').toLowerCase();
+  let appName = 'Google Chrome';
+  if (which.includes('safari')) appName = 'Safari';
+  await ensureAppRunning(appName);
+
+  let getTabScript;
+  if (appName === 'Safari') {
+    getTabScript = `tell application "Safari"
+return (URL of current tab of front window) & "|||" & (name of current tab of front window)
+end tell`;
+  } else {
+    getTabScript = `tell application "Google Chrome"
+return (URL of active tab of front window) & "|||" & (title of active tab of front window)
+end tell`;
+  }
+
+  let url, title;
+  try {
+    const out = await osascriptRun(getTabScript);
+    [url, title] = out.split('|||');
+  } catch (err) {
+    return { content: [{ type: 'text', text: `${appName} has no open windows — open a tab first.` }], isError: true };
+  }
+  if (!url) return { content: [{ type: 'text', text: 'no active tab found' }], isError: true };
+
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Clawd/0.1' },
+      redirect: 'follow',
+    });
+    if (!res.ok) {
+      return {
+        content: [{ type: 'text', text: `URL: ${url}\nTitle: ${title || '(no title)'}\n\nServer returned ${res.status} — page is probably auth-protected; try see_window("${appName.toLowerCase()}") instead.` }],
+      };
+    }
+    const html = await res.text();
+    const text = stripHtmlToText(html).slice(0, 5000);
+    if (text.length < 50) {
+      return {
+        content: [{ type: 'text', text: `URL: ${url}\nTitle: ${title || '(no title)'}\n\nPage looks empty (likely a single-page app that renders content via JavaScript). Use see_window("${appName.toLowerCase()}") instead.` }],
+      };
+    }
+    return {
+      content: [{ type: 'text', text: `URL: ${url}\nTitle: ${title || '(no title)'}\n\nContent:\n${text}` }],
+    };
+  } catch (err) {
+    return {
+      content: [{ type: 'text', text: `Could not fetch ${url}: ${err.message}. Try see_window("${appName.toLowerCase()}") for a screenshot fallback.` }],
+      isError: true,
+    };
+  }
+}
+
 async function frontmostHandler() {
   try {
     const script = `tell application "System Events"
@@ -748,6 +844,12 @@ async function buildServer(sdk) {
         'Captures a specific application window by a substring of its title or app name, EVEN IF that window is behind other windows. Use when the user names a particular app or page ("read my chrome tab", "what is on my slack", "look at the youtube window", "see google"). Pass the shortest identifying substring you can.',
         { query: z.string().describe('substring of the window title or app name, e.g. "chrome", "youtube", "slack", "google"') },
         seeWindowHandler
+      ),
+      tool(
+        'read_browser_tab',
+        'Reads the active tab of Google Chrome (or Safari) by fetching the actual page HTML and extracting clean text. Far more accurate than reading screenshots for web content. PREFER this over see_window/see_screen whenever the user asks about a website, browser tab, "google", "the website", "the page", etc. Falls back gracefully if the page is empty (SPA) or auth-protected.',
+        { browser: z.string().optional().describe('"chrome" (default) or "safari"') },
+        readBrowserTabHandler
       ),
       tool(
         'spotify_status',
@@ -863,6 +965,7 @@ module.exports = {
     'mcp__clawd__frontmost_window',
     'mcp__clawd__see_screen',
     'mcp__clawd__see_window',
+    'mcp__clawd__read_browser_tab',
     'mcp__clawd__spotify_status',
     'mcp__clawd__spotify_play_pause',
     'mcp__clawd__spotify_next',
