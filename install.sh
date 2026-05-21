@@ -26,10 +26,15 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-if [[ "$(uname -m)" != "arm64" ]]; then
-  c_red "Clawd only supports Apple Silicon (M1/M2/M3/M4) for now."
-  exit 1
-fi
+ARCH=$(uname -m)
+case "$ARCH" in
+  arm64) APP_DIST="dist/mac-arm64/Clawd.app" ;;
+  x86_64) APP_DIST="dist/mac/Clawd.app" ;;
+  *)
+    c_red "Unsupported architecture: $ARCH"
+    exit 1
+    ;;
+esac
 
 if ! command -v node &>/dev/null; then
   c_red "Node.js is not installed."
@@ -90,9 +95,16 @@ fi
 step "Building Clawd.app"
 npm run pack 2>&1 | tail -3 || true
 
-if [[ ! -d "dist/mac-arm64/Clawd.app" ]]; then
-  c_red "Build failed — no Clawd.app produced."
-  exit 1
+if [[ ! -d "$APP_DIST" ]]; then
+  # electron-builder occasionally lands the .app at a slightly different path
+  # depending on the version; fall back to a glob.
+  FOUND=$(ls -d dist/*/Clawd.app 2>/dev/null | head -1)
+  if [[ -n "$FOUND" ]]; then
+    APP_DIST="$FOUND"
+  else
+    c_red "Build failed — no Clawd.app produced under dist/"
+    exit 1
+  fi
 fi
 
 # ---- install -----------------------------------------------------------------
@@ -102,7 +114,7 @@ step "Installing to /Applications"
 pkill -f "Clawd.app" 2>/dev/null || true
 sleep 1
 rm -rf /Applications/Clawd.app
-cp -R dist/mac-arm64/Clawd.app /Applications/
+cp -R "$APP_DIST" /Applications/
 
 # ---- done --------------------------------------------------------------------
 

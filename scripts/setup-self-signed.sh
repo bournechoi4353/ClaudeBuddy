@@ -41,14 +41,24 @@ openssl req -x509 -newkey rsa:2048 -nodes \
   -days 3650 \
   -config "$TMP_DIR/ext.cnf" >/dev/null 2>&1
 
-# OpenSSL 3 defaults are too new for macOS keychain; use legacy SHA1/3DES.
-openssl pkcs12 -export -legacy \
-  -inkey "$KEY" -in "$CRT" \
-  -out "$P12" -passout "pass:$P12_PASS" \
-  -name "$CERT_CN" \
-  -macalg sha1 \
-  -keypbe PBE-SHA1-3DES \
-  -certpbe PBE-SHA1-3DES
+# macOS's stock LibreSSL and Homebrew's OpenSSL 3 disagree on PKCS12 flags.
+# OpenSSL 3 needs -legacy plus explicit SHA1/3DES because its new defaults
+# aren't accepted by macOS's keychain. LibreSSL doesn't know -legacy and its
+# defaults already match what the keychain expects, so we skip the flags.
+if openssl version 2>/dev/null | grep -qE "^OpenSSL 3"; then
+  openssl pkcs12 -export -legacy \
+    -inkey "$KEY" -in "$CRT" \
+    -out "$P12" -passout "pass:$P12_PASS" \
+    -name "$CERT_CN" \
+    -macalg sha1 \
+    -keypbe PBE-SHA1-3DES \
+    -certpbe PBE-SHA1-3DES
+else
+  openssl pkcs12 -export \
+    -inkey "$KEY" -in "$CRT" \
+    -out "$P12" -passout "pass:$P12_PASS" \
+    -name "$CERT_CN"
+fi
 
 echo "Importing identity into login keychain..."
 security import "$P12" \

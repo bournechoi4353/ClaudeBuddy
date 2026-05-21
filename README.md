@@ -37,7 +37,7 @@ After that, Clawd is trusted — Spotlight, Launchpad, double-click all work nor
 
 ## Requirements
 
-- **macOS on Apple Silicon** (M1 / M2 / M3 / M4). Intel is not supported.
+- **macOS on Apple Silicon** (M1 / M2 / M3 / M4) — well tested. Intel Macs should work too (the installer auto-detects arch and builds the right binary) but they're not tested yet.
 - **Node.js 20+** — used to build Clawd. Install with `brew install node` or from <https://nodejs.org>.
 - **Claude Pro or Max subscription.**
 - **Claude Code installed, signed in** — install from <https://claude.com/code>, then run `claude login` in a terminal. Clawd won't be able to chat without this.
