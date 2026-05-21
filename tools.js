@@ -89,7 +89,10 @@ async function captureScreenPng() {
   try {
     const display = screen.getPrimaryDisplay();
     const { width, height } = display.size;
-    const maxDim = 1280;
+    // Claude vision is most effective at up to 1568px on the long edge; the
+    // API downscales anything larger. Capturing at this size gives us much
+    // sharper text (Chrome web content was illegible at 1280).
+    const maxDim = 1568;
     const scale = Math.min(1, maxDim / Math.max(width, height));
     const tw = Math.max(1, Math.floor(width * scale));
     const th = Math.max(1, Math.floor(height * scale));
@@ -130,7 +133,9 @@ async function captureWindowByQuery(query) {
   assertScreenPermission();
   const sources = await desktopCapturer.getSources({
     types: ['window'],
-    thumbnailSize: { width: 1280, height: 800 },
+    // 1568 is the largest size Claude vision uses without internal downscale.
+    // Earlier 1280 made browser text unreadable on Retina displays.
+    thumbnailSize: { width: 1568, height: 1568 },
   });
   const q = (query || '').toLowerCase().trim();
   const match = sources.find((s) => s.name && s.name.toLowerCase().includes(q));
