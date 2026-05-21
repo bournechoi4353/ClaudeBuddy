@@ -96,10 +96,23 @@
     <option value="zen">Zen — calm, philosophical</option>
   </select>
 
+  <label class="field" for="skin">Skin</label>
+  <select id="skin">
+    <option value="default">Default — classic orange</option>
+    <option value="hacker">Hacker — green crab with glasses</option>
+    <option value="ghost">Ghost — pale white</option>
+    <option value="sushi">Sushi — salmon pink</option>
+    <option value="royal">Royal — purple with a crown</option>
+    <option value="boba">Boba — milk-tea tan</option>
+    <option value="cyberpunk">Cyberpunk — neon pink + cyan eyes</option>
+    <option value="shadow">Shadow — dark with glowing eyes</option>
+    <option value="custom">Custom — pick your own color</option>
+  </select>
+
   <label class="field" for="speed">Walk speed: <output id="speedVal">0.5</output> px/frame</label>
   <input type="range" id="speed" min="0.1" max="2.0" step="0.1">
 
-  <label class="field">Crab color</label>
+  <label class="field" id="colorLabel">Crab color (only used by Custom skin)</label>
   <div class="row">
     <input type="color" id="color">
     <span class="val" id="colorVal">#CC785C</span>

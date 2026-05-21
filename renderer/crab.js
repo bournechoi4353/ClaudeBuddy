@@ -17,9 +17,26 @@ const CRAB = [
 ];
 
 const COLORS = {
-  O: '#CC785C', // live-updated from prefs window
-  X: '#000000',
+  O: '#CC785C', // body — live-updated from prefs window / skin selection
+  X: '#000000', // eyes — live-updated from skin selection
 };
+
+// Skin presets. Each picks a body + eye color, optionally a permanent
+// accessory drawn on top of the crab. "custom" means: defer to prefs.crabColor
+// for the body so the user's color-picker choice wins.
+const SKINS = {
+  default:    { body: '#CC785C', eye: '#000000' },
+  hacker:     { body: '#1AAF5D', eye: '#000000', accessory: 'glasses' },
+  ghost:      { body: '#F5F5F5', eye: '#555555' },
+  sushi:      { body: '#E8769A', eye: '#000000' },
+  royal:      { body: '#7B5BAD', eye: '#000000', accessory: 'crown', accessoryColor: '#FFD700' },
+  boba:       { body: '#D4A574', eye: '#4A2C1A' },
+  cyberpunk:  { body: '#FF1493', eye: '#00FFFF' },
+  shadow:     { body: '#2C2C2C', eye: '#FF6B35' },
+};
+
+let currentSkinAccessory = null;
+let currentSkinAccessoryColor = null;
 
 // Initial scale read from URL params at load time so we don't render at the
 // default and then jump when the IPC arrives.
@@ -55,9 +72,26 @@ if (window.crabAPI && window.crabAPI.onSetScale) {
 function applyPrefs(p) {
   if (!p) return;
   if (typeof p.crabSpeed === 'number' && p.crabSpeed > 0) SPEED = p.crabSpeed;
-  if (typeof p.crabColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(p.crabColor)) COLORS.O = p.crabColor;
   if (typeof p.sleepMinutes === 'number' && p.sleepMinutes > 0) {
     SLEEP_AFTER_MS = p.sleepMinutes * 60 * 1000;
+  }
+  // Skin selection drives both body and eye colors AND any permanent accessory.
+  // "custom" (or unset) defers to prefs.crabColor for the body and keeps eyes black.
+  const skinId = p.skin || 'custom';
+  const skin = SKINS[skinId];
+  if (skin) {
+    COLORS.O = skin.body;
+    COLORS.X = skin.eye || '#000000';
+    currentSkinAccessory = skin.accessory || null;
+    currentSkinAccessoryColor = skin.accessoryColor || null;
+  } else {
+    // custom — body driven by color picker, eyes always black, no permanent accessory.
+    if (typeof p.crabColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(p.crabColor)) {
+      COLORS.O = p.crabColor;
+    }
+    COLORS.X = '#000000';
+    currentSkinAccessory = null;
+    currentSkinAccessoryColor = null;
   }
 }
 if (window.crabAPI && window.crabAPI.getPrefs) {
@@ -262,6 +296,12 @@ const ACCESSORY_CELLS = {
     [1, 1], [1, 2],
     [10, 1], [10, 2],
   ],
+  crown: [
+    // Band resting on top of his head
+    [3, -1], [4, -1], [5, -1], [6, -1], [7, -1], [8, -1], [9, -1],
+    // Spikes above the band
+    [3, -2], [5, -2], [7, -2], [9, -2],
+  ],
 };
 
 // Contextual animation states — additive layers on top of the behavior state
@@ -429,7 +469,19 @@ function draw() {
     }
   }
 
-  // Accessories on top of everything else.
+  // Permanent skin accessory (e.g., royal skin's crown). Drawn first so the
+  // temporary tool-use accessory (glasses while reading) sits on top if both apply.
+  if (currentSkinAccessory) {
+    const cells = ACCESSORY_CELLS[currentSkinAccessory];
+    if (cells) {
+      ctx.fillStyle = currentSkinAccessoryColor || COLORS.X;
+      for (const [c, r] of cells) {
+        ctx.fillRect(drawX + c * SCALE, drawY + r * SCALE, SCALE, SCALE);
+      }
+    }
+  }
+
+  // Temporary accessory triggered by tool use (glasses, headphones, etc.).
   if (accessory && performance.now() < accessoryUntil) {
     const cells = ACCESSORY_CELLS[accessory];
     if (cells) {

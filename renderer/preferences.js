@@ -4,6 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const petName = $('petName');
   const personality = $('personality');
+  const skin = $('skin');
   const speed = $('speed');
   const speedVal = $('speedVal');
   const color = $('color');
@@ -13,12 +14,21 @@
 
   petName.value = prefs.petName || 'clawd';
   personality.value = prefs.personality || 'default';
+  skin.value = prefs.skin || 'default';
   speed.value = prefs.crabSpeed != null ? prefs.crabSpeed : 0.5;
   speedVal.textContent = parseFloat(speed.value).toFixed(1);
   color.value = prefs.crabColor || '#CC785C';
   colorVal.textContent = color.value.toUpperCase();
   sleepMin.value = prefs.sleepMinutes != null ? prefs.sleepMinutes : 3;
   sleepMinVal.textContent = sleepMin.value;
+
+  // Color picker only matters when the Custom skin is selected.
+  function refreshColorState() {
+    const isCustom = skin.value === 'custom';
+    color.disabled = !isCustom;
+    color.style.opacity = isCustom ? '1' : '0.4';
+  }
+  refreshColorState();
 
   // Live save on each input change.
   petName.addEventListener('input', () => {
@@ -27,6 +37,10 @@
   });
   personality.addEventListener('change', () => {
     window.crabAPI.setPref({ personality: personality.value });
+  });
+  skin.addEventListener('change', () => {
+    window.crabAPI.setPref({ skin: skin.value });
+    refreshColorState();
   });
   speed.addEventListener('input', () => {
     speedVal.textContent = parseFloat(speed.value).toFixed(1);
