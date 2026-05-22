@@ -705,6 +705,95 @@ async function cancelTimerHandler({ id }) {
   return { content: [{ type: 'text', text: `cancelled timer "${target.label}"` }] };
 }
 
+// ---- Web search ----
+// Uses DuckDuckGo's HTML endpoint (no API key, no rate limit) for the result
+// list, then fetches the top pages' actual content so Clawd has real material
+// to work from instead of just snippets.
+
+function parseDuckDuckGoResults(html) {
+  const results = [];
+  const titleRe = /<a\s+[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  const snipRe = /<a\s+[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+  const titles = [];
+  const snippets = [];
+  let m;
+  while ((m = titleRe.exec(html)) !== null) titles.push({ url: m[1], title: m[2] });
+  while ((m = snipRe.exec(html)) !== null) snippets.push(m[1]);
+  for (let i = 0; i < titles.length; i++) {
+    let url = titles[i].url;
+    // DDG wraps result URLs in /l/?uddg=<encoded> — unwrap.
+    if (url.includes('/l/?') && url.includes('uddg=')) {
+      const u = url.match(/uddg=([^&]+)/);
+      if (u) url = decodeURIComponent(u[1]);
+    }
+    if (url.startsWith('//')) url = 'https:' + url;
+    const title = stripHtmlToText(titles[i].title).trim();
+    const snippet = snippets[i] ? stripHtmlToText(snippets[i]).trim() : '';
+    if (title && /^https?:\/\//.test(url)) results.push({ title, url, snippet });
+  }
+  return results;
+}
+
+async function webSearchHandler({ query }) {
+  if (!query || !query.trim()) {
+    return { content: [{ type: 'text', text: 'no query given' }], isError: true };
+  }
+  const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+  let html;
+  try {
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+      headers: { 'User-Agent': ua, 'Accept-Language': 'en-US,en;q=0.9' },
+      redirect: 'follow',
+    });
+    if (!res.ok) throw new Error(`search server ${res.status}`);
+    html = await res.text();
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'web search failed: ' + (err.message || err) }], isError: true };
+  }
+
+  const results = parseDuckDuckGoResults(html).slice(0, 5);
+  if (results.length === 0) {
+    return { content: [{ type: 'text', text: `no results for "${query}"` }] };
+  }
+
+  // Fetch the top 3 pages in parallel and pull readable text from each.
+  const fetchPage = async (r) => {
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(r.url, {
+        signal: ctrl.signal,
+        redirect: 'follow',
+        headers: { 'User-Agent': ua, 'Accept-Language': 'en-US,en;q=0.9' },
+      });
+      clearTimeout(to);
+      if (!res.ok) return null;
+      const pageHtml = await res.text();
+      return stripHtmlToText(pageHtml).slice(0, 3000);
+    } catch {
+      return null;
+    }
+  };
+  const fetched = await Promise.all(results.slice(0, 3).map(fetchPage));
+  fetched.forEach((text, i) => {
+    if (text && text.length > 100) results[i].content = text;
+  });
+
+  const formatted = results
+    .map((r, i) => {
+      let out = `[${i + 1}] ${r.title}\n    ${r.url}`;
+      if (r.snippet) out += `\n    ${r.snippet}`;
+      if (r.content) out += `\n\n    --- Page content ---\n    ${r.content.split('\n').slice(0, 40).join('\n    ')}`;
+      return out;
+    })
+    .join('\n\n');
+
+  return {
+    content: [{ type: 'text', text: `Search results for "${query}":\n\n${formatted}` }],
+  };
+}
+
 // ---- Browser tab reader (Chrome / Safari) ----
 // Bypasses screenshot OCR entirely: gets the active tab's URL via AppleScript,
 // fetches the page directly, strips HTML to readable text. Much more reliable
@@ -954,6 +1043,12 @@ async function buildServer(sdk) {
         seeWindowHandler
       ),
       tool(
+        'web_search',
+        'Searches the web (via DuckDuckGo) for the query and ALSO fetches the actual content of the top 3 result pages so you have real material to work with — not just snippets. Use for "search X", "look up X", "what\'s the latest on X", "find out about X", or any time the user wants information beyond your training cutoff. Always synthesize across the page contents in your reply rather than dumping a list.',
+        { query: z.string().describe('what to search for, in plain language. include dates, names, model numbers, etc. if relevant.') },
+        webSearchHandler
+      ),
+      tool(
         'read_browser_tab',
         'Reads a tab of Google Chrome (or Safari) by fetching its page HTML and extracting clean text. PREFER this over see_window/see_screen whenever the user asks about a website, browser tab, "google", "the website", "the page", etc. Pass a `query` substring (e.g. "clawdbuddy", "github", "youtube") to find a specific tab across ALL windows — even tabs in background windows or other monitors. With no query, reads the active tab of the front window. Returns the list of all tabs if nothing matches the query so you can retry.',
         {
@@ -1076,6 +1171,7 @@ module.exports = {
     'mcp__clawd__frontmost_window',
     'mcp__clawd__see_screen',
     'mcp__clawd__see_window',
+    'mcp__clawd__web_search',
     'mcp__clawd__read_browser_tab',
     'mcp__clawd__spotify_status',
     'mcp__clawd__spotify_play_pause',
