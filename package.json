@@ -19,6 +19,7 @@
       "tools.js",
       "spotify-auth.js",
       "google-auth.js",
+      "google-secrets.js",
       "renderer/**/*",
       "package.json"
     ],
