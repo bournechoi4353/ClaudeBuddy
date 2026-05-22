@@ -794,6 +794,276 @@ async function webSearchHandler({ query }) {
   };
 }
 
+// ---- Google APIs via per-user OAuth (Gmail / Docs / Drive) ----
+const googleAuth = require('./google-auth');
+
+function persistGoogleRotatedRefresh(newRefresh) {
+  try {
+    const fresh = { ...getPrefs(), googleRefreshToken: newRefresh };
+    const p = path.join(electronApp.getPath('userData'), 'prefs.json');
+    fs.writeFileSync(p, JSON.stringify(fresh, null, 2));
+    _cachedPrefs = fresh;
+    _cachedPrefsAt = Date.now();
+  } catch (_) {}
+}
+
+async function getGoogleToken() {
+  const prefs = getPrefs();
+  return googleAuth.getAccessToken(prefs.googleRefreshToken, persistGoogleRotatedRefresh);
+}
+
+function googleNotConnectedError() {
+  return {
+    content: [{ type: 'text', text: "google isn't connected. tell the user to click the clawd label in their menubar and pick 'Connect Google' — one-time login." }],
+    isError: true,
+  };
+}
+
+async function gmailRecentHandler({ count }) {
+  if (!getPrefs().googleRefreshToken) return googleNotConnectedError();
+  try {
+    const token = await getGoogleToken();
+    const n = Math.max(1, Math.min(20, count || 5));
+    const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${n}&labelIds=INBOX`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!listRes.ok) throw new Error(`list ${listRes.status}`);
+    const data = await listRes.json();
+    const messages = data.messages || [];
+    if (messages.length === 0) return { content: [{ type: 'text', text: 'inbox is empty' }] };
+
+    const fetchOne = async (m) => {
+      const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return null;
+      const d = await r.json();
+      const headers = (d.payload && d.payload.headers) || [];
+      const get = (h) => (headers.find((x) => x.name === h) || {}).value || '';
+      return { from: get('From'), subject: get('Subject'), date: get('Date'), snippet: d.snippet || '' };
+    };
+    const details = (await Promise.all(messages.map(fetchOne))).filter(Boolean);
+    const out = details.map((m) => `---\nFrom: ${m.from}\nSubject: ${m.subject}\nDate: ${m.date}\nSnippet: ${m.snippet}`).join('\n');
+    return { content: [{ type: 'text', text: out }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'gmail error: ' + (err.message || err) }], isError: true };
+  }
+}
+
+async function gmailSearchHandler({ query }) {
+  if (!getPrefs().googleRefreshToken) return googleNotConnectedError();
+  if (!query) return { content: [{ type: 'text', text: 'no search query' }], isError: true };
+  try {
+    const token = await getGoogleToken();
+    const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!listRes.ok) throw new Error(`search ${listRes.status}`);
+    const data = await listRes.json();
+    const messages = data.messages || [];
+    if (messages.length === 0) return { content: [{ type: 'text', text: `no gmail messages match "${query}"` }] };
+
+    const fetchOne = async (m) => {
+      const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return null;
+      const d = await r.json();
+      const headers = (d.payload && d.payload.headers) || [];
+      const get = (h) => (headers.find((x) => x.name === h) || {}).value || '';
+      return { from: get('From'), subject: get('Subject'), date: get('Date'), snippet: d.snippet || '' };
+    };
+    const details = (await Promise.all(messages.map(fetchOne))).filter(Boolean);
+    const out = details.map((m) => `---\nFrom: ${m.from}\nSubject: ${m.subject}\nDate: ${m.date}\nSnippet: ${m.snippet}`).join('\n');
+    return { content: [{ type: 'text', text: out }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'gmail search error: ' + (err.message || err) }], isError: true };
+  }
+}
+
+async function gmailSendHandler({ to, subject, body }) {
+  if (!getPrefs().googleRefreshToken) return googleNotConnectedError();
+  if (!to || !subject || !body) {
+    return { content: [{ type: 'text', text: 'need to, subject, and body' }], isError: true };
+  }
+  try {
+    const token = await getGoogleToken();
+    const rfc822 = [
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      'MIME-Version: 1.0',
+      '',
+      body,
+    ].join('\r\n');
+    const raw = Buffer.from(rfc822).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`send ${res.status}: ${t}`);
+    }
+    return { content: [{ type: 'text', text: `sent email to ${to}` }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'gmail send error: ' + (err.message || err) }], isError: true };
+  }
+}
+
+async function driveSearchHandler({ query }) {
+  if (!getPrefs().googleRefreshToken) return googleNotConnectedError();
+  if (!query) return { content: [{ type: 'text', text: 'no search query' }], isError: true };
+  try {
+    const token = await getGoogleToken();
+    const q = `name contains '${query.replace(/'/g, "\\'")}' and trashed = false`;
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=10&fields=files(id,name,mimeType,modifiedTime,webViewLink)`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`drive ${res.status}`);
+    const data = await res.json();
+    const files = data.files || [];
+    if (files.length === 0) return { content: [{ type: 'text', text: `no drive files match "${query}"` }] };
+    const out = files.map((f) => `${f.name} (${f.mimeType.replace('application/vnd.google-apps.', '')}) — ${f.id}\n  modified ${f.modifiedTime}\n  ${f.webViewLink}`).join('\n\n');
+    return { content: [{ type: 'text', text: out }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'drive search error: ' + (err.message || err) }], isError: true };
+  }
+}
+
+async function docsReadHandler({ documentId }) {
+  if (!getPrefs().googleRefreshToken) return googleNotConnectedError();
+  if (!documentId) return { content: [{ type: 'text', text: 'need a document id (use drive_search to find one)' }], isError: true };
+  try {
+    const token = await getGoogleToken();
+    const res = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`docs ${res.status}`);
+    const data = await res.json();
+    // Walk the document's body content and concatenate text runs.
+    const lines = [];
+    const elements = (data.body && data.body.content) || [];
+    for (const el of elements) {
+      if (!el.paragraph) continue;
+      const runs = el.paragraph.elements || [];
+      const text = runs.map((r) => (r.textRun && r.textRun.content) || '').join('');
+      lines.push(text);
+    }
+    const text = lines.join('').slice(0, 5000);
+    return { content: [{ type: 'text', text: `Title: ${data.title || '(untitled)'}\n\n${text}` }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'docs read error: ' + (err.message || err) }], isError: true };
+  }
+}
+
+// ---- Mail (macOS Mail.app via AppleScript) — kept as a fallback ----
+// Works for any account synced to Mail.app, including Gmail. User has to have
+// added their account to System Settings → Internet Accounts at least once.
+
+async function getRecentEmailsHandler({ count }) {
+  await ensureAppRunning('Mail');
+  const n = Math.max(1, Math.min(20, count || 5));
+  const script = `tell application "Mail"
+set output to ""
+set theMessages to messages of inbox
+set total to count of theMessages
+set maxN to ${n}
+if total < maxN then set maxN to total
+repeat with i from 1 to maxN
+set m to item i of theMessages
+set output to output & "---" & linefeed
+try
+set output to output & "From: " & (sender of m) & linefeed
+end try
+try
+set output to output & "Subject: " & (subject of m) & linefeed
+end try
+try
+set output to output & "Date: " & ((date received of m) as text) & linefeed
+end try
+try
+set snip to content of m as text
+if (length of snip) > 250 then set snip to (text 1 thru 250 of snip)
+set output to output & "Snippet: " & snip & linefeed
+end try
+end repeat
+return output
+end tell`;
+  try {
+    const out = await osascriptRun(script);
+    return { content: [{ type: 'text', text: out || 'inbox is empty' }] };
+  } catch (err) {
+    return {
+      content: [{ type: 'text', text: 'mail error: ' + err.message + ' (Mail.app may need full disk / contacts permission)' }],
+      isError: true,
+    };
+  }
+}
+
+async function searchEmailsHandler({ query }) {
+  if (!query || !query.trim()) {
+    return { content: [{ type: 'text', text: 'no search query' }], isError: true };
+  }
+  await ensureAppRunning('Mail');
+  const q = query.replace(/"/g, '\\"');
+  const script = `tell application "Mail"
+set output to ""
+set hits to {}
+try
+set hits to (messages of inbox whose (subject contains "${q}") or (content contains "${q}"))
+end try
+set total to count of hits
+set maxN to 5
+if total < maxN then set maxN to total
+repeat with i from 1 to maxN
+set m to item i of hits
+set output to output & "---" & linefeed
+try
+set output to output & "From: " & (sender of m) & linefeed
+end try
+try
+set output to output & "Subject: " & (subject of m) & linefeed
+end try
+try
+set output to output & "Date: " & ((date received of m) as text) & linefeed
+end try
+end repeat
+return output
+end tell`;
+  try {
+    const out = await osascriptRun(script);
+    return { content: [{ type: 'text', text: out || `no emails matched "${query}"` }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'mail search error: ' + err.message }], isError: true };
+  }
+}
+
+async function sendEmailHandler({ to, subject, body }) {
+  if (!to || !subject || !body) {
+    return { content: [{ type: 'text', text: 'need to, subject, and body' }], isError: true };
+  }
+  await ensureAppRunning('Mail');
+  const toSafe = to.replace(/"/g, '\\"');
+  const subjSafe = subject.replace(/"/g, '\\"');
+  const bodySafe = body.replace(/"/g, '\\"').replace(/\n/g, '\\n');
+  const script = `tell application "Mail"
+set newMsg to make new outgoing message with properties {subject:"${subjSafe}", content:"${bodySafe}", visible:false}
+tell newMsg
+make new to recipient at end of to recipients with properties {address:"${toSafe}"}
+end tell
+send newMsg
+end tell`;
+  try {
+    await osascriptRun(script);
+    return { content: [{ type: 'text', text: `sent email to ${to}` }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'could not send email: ' + err.message }], isError: true };
+  }
+}
+
 // ---- Browser tab reader (Chrome / Safari) ----
 // Bypasses screenshot OCR entirely: gets the active tab's URL via AppleScript,
 // fetches the page directly, strips HTML to readable text. Much more reliable
@@ -1139,6 +1409,62 @@ async function buildServer(sdk) {
         saveNoteHandler
       ),
       tool(
+        'gmail_recent',
+        "Returns the most recent emails from the user's Gmail inbox via the Gmail API. PREFER this over get_recent_emails when the user is on Gmail. Requires the user to have connected their Google account (menubar → Connect Google).",
+        { count: z.number().optional().describe('how many recent emails (1-20, default 5)') },
+        gmailRecentHandler
+      ),
+      tool(
+        'gmail_search',
+        "Searches Gmail using Gmail's native search query syntax (e.g. 'from:bob', 'subject:invoice', 'has:attachment'). PREFER this over search_emails.",
+        { query: z.string().describe('Gmail search query — supports operators like from:, to:, subject:, has:attachment, after:YYYY/MM/DD') },
+        gmailSearchHandler
+      ),
+      tool(
+        'gmail_send',
+        'Sends an email through the connected Gmail account. PREFER this over send_email when the user is on Gmail.',
+        {
+          to: z.string().describe('recipient email address'),
+          subject: z.string().describe('subject line'),
+          body: z.string().describe('email body'),
+        },
+        gmailSendHandler
+      ),
+      tool(
+        'drive_search',
+        'Searches the user\'s Google Drive for files by name substring. Returns id + name + type + view link + modified date for up to 10 files. Use to find a Doc/Sheet/Slide to read.',
+        { query: z.string().describe('name substring to look for, e.g. "project plan", "invoice", "clawd"') },
+        driveSearchHandler
+      ),
+      tool(
+        'docs_read',
+        'Reads the text content of a Google Doc by its document ID (use drive_search first to find IDs). Returns the title plus the body text.',
+        { documentId: z.string().describe('Google Doc ID — looks like "1AbC2dEfG..." (from drive_search results or a Docs URL)') },
+        docsReadHandler
+      ),
+      tool(
+        'get_recent_emails',
+        'Returns the most recent emails from the macOS Mail.app inbox. FALLBACK only — prefer gmail_recent when the user is on Gmail and Google is connected.',
+        { count: z.number().optional().describe('how many recent emails (1-20, default 5)') },
+        getRecentEmailsHandler
+      ),
+      tool(
+        'search_emails',
+        'Searches the macOS Mail.app inbox for emails whose subject or body contains the query. Use for "find email from <person>", "did i get an email about <thing>", "search emails for <topic>".',
+        { query: z.string().describe('text to search for in subject or body') },
+        searchEmailsHandler
+      ),
+      tool(
+        'send_email',
+        'Sends an email via macOS Mail.app from the user\'s default account. Use when the user says "email X about Y", "send an email to X".',
+        {
+          to: z.string().describe('recipient email address'),
+          subject: z.string().describe('subject line'),
+          body: z.string().describe('email body'),
+        },
+        sendEmailHandler
+      ),
+      tool(
         'start_timer',
         'Starts a countdown timer. When it ends, Clawd visibly reacts (hops, shows a thought bubble). Use for "set a 25 minute timer", "pomodoro", "remind me in 10 minutes".',
         {
@@ -1185,6 +1511,14 @@ module.exports = {
     'mcp__clawd__weather',
     'mcp__clawd__get_notes',
     'mcp__clawd__save_note',
+    'mcp__clawd__gmail_recent',
+    'mcp__clawd__gmail_search',
+    'mcp__clawd__gmail_send',
+    'mcp__clawd__drive_search',
+    'mcp__clawd__docs_read',
+    'mcp__clawd__get_recent_emails',
+    'mcp__clawd__search_emails',
+    'mcp__clawd__send_email',
     'mcp__clawd__start_timer',
     'mcp__clawd__list_timers',
     'mcp__clawd__cancel_timer',

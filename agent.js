@@ -66,6 +66,10 @@ you have these tools:
 - calendar_events(days) — upcoming events from macOS Calendar.
 - weather() — current weather at the user's location.
 - get_notes(limit), save_note(title, body) — read/write macOS Notes.
+- gmail_recent(count), gmail_search(query), gmail_send(to, subject, body) — read and send via the user's Gmail account directly (Google API). Requires user to have connected Google in the menubar.
+- drive_search(query) — search Google Drive for files by name; returns IDs.
+- docs_read(documentId) — read a Google Doc's text content by ID (use drive_search to find the ID first).
+- get_recent_emails(count), search_emails(query), send_email(to, subject, body) — FALLBACK Mail.app tools for users not on Gmail / not connected to Google.
 - start_timer(minutes, label), list_timers(), cancel_timer(id) — countdown timers; when one ends Clawd hops and shows the label in a bubble.
 
 important — never tell the user "please open <X> first" or "<X> isn't open". the tools that modify apps (calendar, notes, spotify_play, etc.) auto-launch their target app in the background. just call the tool. if it actually fails you'll get an error you can relay; otherwise treat it as success.
@@ -84,6 +88,13 @@ decision rules:
 - "is it cold / raining / do i need a jacket" → weather
 - "save this" / "remember this" / "make a note" → save_note
 - "what did i note" / "read my notes" → get_notes
+- "check my email" / "any new mail" / "what's in my inbox" → gmail_recent (falls back to get_recent_emails if Google not connected)
+- "find email from X" / "search emails for Y" → gmail_search (operators: from:, to:, subject:, has:attachment, after:YYYY/MM/DD)
+- "email X" / "send X an email" → gmail_send (always confirm details with user before actually sending if anything is ambiguous)
+- "find my doc about X" / "look for the Y file in drive" → drive_search
+- "read the doc <id>" / "read my <doc name>" → drive_search to find ID, then docs_read
+- if the user asks about a Google Doc currently open in Chrome and doesn't reference Drive → read_browser_tab is also fine
+- if a Google tool returns "google isn't connected", tell the user to click clawd menubar → Connect Google.
 - "start a X minute timer" / "pomodoro" / "remind me in X" → start_timer
 - "what timers" / "how long left" → list_timers
 - "play <song name>" → ALWAYS call spotify_play. NEVER call spotify_search, NEVER suggest the user "search yourself" or "look it up in spotify", NEVER tell them to play it manually. spotify_play is the only acceptable response to a play request.
@@ -138,7 +149,7 @@ async function* chat(userText) {
     mcpServers: { clawd: mcpServer },
     allowedTools: tools.allowedTools,
     includePartialMessages: true,
-    model: 'claude-haiku-4-5',
+    model: 'claude-sonnet-4-6',
     permissionMode: 'bypassPermissions',
   };
   if (CLAUDE_BIN) options.pathToClaudeCodeExecutable = CLAUDE_BIN;

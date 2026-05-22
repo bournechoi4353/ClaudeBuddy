@@ -18,6 +18,7 @@
       "agent.js",
       "tools.js",
       "spotify-auth.js",
+      "google-auth.js",
       "renderer/**/*",
       "package.json"
     ],

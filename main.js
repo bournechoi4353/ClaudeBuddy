@@ -37,6 +37,7 @@ for (const k of Object.keys(process.env)) {
 
 const agent = require('./agent');
 const spotifyAuth = require('./spotify-auth');
+const googleAuth = require('./google-auth');
 const tools = require('./tools');
 const { dialog, shell } = require('electron');
 const os = require('os');
@@ -276,6 +277,45 @@ function disconnectSpotify() {
   rebuildTrayMenu();
 }
 
+let googleConnecting = false;
+
+async function connectGoogle() {
+  if (googleConnecting) return;
+  googleConnecting = true;
+  rebuildTrayMenu();
+  try {
+    const tokens = await googleAuth.connect();
+    if (!tokens.refresh_token) {
+      throw new Error('Google did not return a refresh token. Make sure access_type=offline + prompt=consent are set (they are) and that you haven\'t previously authorized — try revoking at myaccount.google.com/permissions and reconnecting.');
+    }
+    prefs.googleRefreshToken = tokens.refresh_token;
+    savePrefs(prefs);
+    dialog.showMessageBox({
+      type: 'info',
+      message: 'Clawd is connected to Google',
+      detail: 'Now ask things like "check my email", "find email from X", "search drive for Y", "read the doc about Z".',
+      buttons: ['OK'],
+    });
+  } catch (err) {
+    dialog.showMessageBox({
+      type: 'error',
+      message: 'Google connection failed',
+      detail: err.message || String(err),
+      buttons: ['OK'],
+    });
+  } finally {
+    googleConnecting = false;
+    rebuildTrayMenu();
+  }
+}
+
+function disconnectGoogle() {
+  delete prefs.googleRefreshToken;
+  savePrefs(prefs);
+  googleAuth.clearCache();
+  rebuildTrayMenu();
+}
+
 function rebuildTrayMenu() {
   const launchAtLogin = app.getLoginItemSettings().openAtLogin;
   const monitorItems = buildMonitorSubmenu();
@@ -296,6 +336,11 @@ function rebuildTrayMenu() {
       : spotifyConnected
       ? { label: 'Disconnect Spotify', click: disconnectSpotify }
       : { label: 'Connect Spotify…', click: connectSpotify },
+    googleConnecting
+      ? { label: 'Connecting Google…', enabled: false }
+      : prefs.googleRefreshToken
+      ? { label: 'Disconnect Google', click: disconnectGoogle }
+      : { label: 'Connect Google…', click: connectGoogle },
     {
       label: 'Launch at login',
       type: 'checkbox',
