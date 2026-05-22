@@ -20,6 +20,9 @@ const { shell } = require('electron');
 // Replace this with the client ID from your Google Cloud OAuth credentials.
 // Format: <numbers>-<hash>.apps.googleusercontent.com
 const CLIENT_ID = '292383281461-7ef4tmkbb7h5ci8daf2mamaela3iq2dp.apps.googleusercontent.com';
+// Desktop OAuth clients in Google Cloud require client_secret on the token
+// exchange even with PKCE. Loaded from gitignored google-secrets.js.
+const { CLIENT_SECRET } = require('./google-secrets');
 const REDIRECT_PORT = 8889;
 const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/google-callback`;
 const SCOPES = [
@@ -96,6 +99,7 @@ function connect() {
             code,
             redirect_uri: REDIRECT_URI,
             client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET,
             code_verifier: verifier,
           }),
         });
@@ -149,6 +153,7 @@ async function refreshFromToken(refreshToken) {
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
       client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
     }),
   });
   if (!res.ok) {
