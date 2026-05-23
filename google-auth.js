@@ -21,8 +21,18 @@ const { shell } = require('electron');
 // Format: <numbers>-<hash>.apps.googleusercontent.com
 const CLIENT_ID = '292383281461-7ef4tmkbb7h5ci8daf2mamaela3iq2dp.apps.googleusercontent.com';
 // Desktop OAuth clients in Google Cloud require client_secret on the token
-// exchange even with PKCE. Loaded from gitignored google-secrets.js.
-const { CLIENT_SECRET } = require('./google-secrets');
+// exchange even with PKCE. Lazy-loaded so a missing google-secrets.js file
+// only breaks Google features, not the whole app.
+function loadClientSecret() {
+  try {
+    const v = require('./google-secrets').CLIENT_SECRET;
+    if (!v || v === 'PASTE_YOUR_GOOGLE_CLIENT_SECRET_HERE') return null;
+    return v;
+  } catch (_) {
+    return null;
+  }
+}
+const CLIENT_SECRET = loadClientSecret();
 const REDIRECT_PORT = 8889;
 const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/google-callback`;
 const SCOPES = [
@@ -56,6 +66,10 @@ function connect() {
   return new Promise((resolve, reject) => {
     if (!CLIENT_ID || CLIENT_ID.startsWith('YOUR_')) {
       reject(new Error("Google OAuth client ID isn't configured yet. The Clawd developer needs to set up a Google Cloud OAuth credential. See README → Google setup."));
+      return;
+    }
+    if (!CLIENT_SECRET) {
+      reject(new Error("Google OAuth client secret is missing (google-secrets.js not present or unfilled). If you installed via the curl one-liner, the maintainer hasn't shipped a secret in their repo — you'll need to fork Clawd and add your own."));
       return;
     }
 
@@ -146,6 +160,9 @@ function connect() {
 }
 
 async function refreshFromToken(refreshToken) {
+  if (!CLIENT_SECRET) {
+    throw new Error('Google client secret missing — reconnect via the menubar after the maintainer ships secrets.');
+  }
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
