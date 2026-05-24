@@ -97,17 +97,20 @@
   </select>
 
   <label class="field" for="skin">Skin</label>
-  <select id="skin">
-    <option value="default">Default — classic orange</option>
-    <option value="hacker">Hacker — green crab with glasses</option>
-    <option value="ghost">Ghost — pale white</option>
-    <option value="sushi">Sushi — salmon pink</option>
-    <option value="royal">Royal — purple with a crown</option>
-    <option value="boba">Boba — milk-tea tan</option>
-    <option value="cyberpunk">Cyberpunk — neon pink + cyan eyes</option>
-    <option value="shadow">Shadow — dark with glowing eyes</option>
-    <option value="custom">Custom — pick your own color</option>
-  </select>
+  <div class="row">
+    <select id="skin" style="flex:1">
+      <option value="default">Default — classic orange</option>
+      <option value="hacker">Hacker — green crab with glasses</option>
+      <option value="ghost">Ghost — pale white</option>
+      <option value="sushi">Sushi — salmon pink</option>
+      <option value="royal">Royal — purple with a crown</option>
+      <option value="boba">Boba — milk-tea tan</option>
+      <option value="cyberpunk">Cyberpunk — neon pink + cyan eyes</option>
+      <option value="shadow">Shadow — dark with glowing eyes</option>
+      <option value="custom">Custom — pick your own color</option>
+    </select>
+    <span id="skinSwatch" style="flex:0 0 26px;width:26px;height:26px;border:1px solid #000;background:#CC785C"></span>
+  </div>
 
   <label class="field" for="speed">Walk speed: <output id="speedVal">0.5</output> px/frame</label>
   <input type="range" id="speed" min="0.1" max="2.0" step="0.1">

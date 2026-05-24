@@ -35,7 +35,22 @@ window.crabAPI.onChatPiece((piece) => {
     currentReplyEl.textContent += piece.text;
     historyEl.scrollTop = historyEl.scrollHeight;
   } else if (piece.type === 'error') {
-    addMessage('crab', '[' + piece.error + ']');
+    // Map common SDK-level errors to in-character messages instead of leaking
+    // raw error strings to the user.
+    const raw = (piece.error || '').toLowerCase();
+    let friendly;
+    if (raw.includes('invalid_api_key') || raw.includes('authentication') || raw.includes('credentials')) {
+      friendly = "i can't reach claude right now. make sure you've run `claude login` in a terminal, then try again.";
+    } else if (raw.includes('rate') && raw.includes('limit')) {
+      friendly = 'too many words too fast. try again in a bit.';
+    } else if (raw.includes('network') || raw.includes('econn') || raw.includes('fetch failed')) {
+      friendly = "can't reach the internet right now. check your wifi?";
+    } else if (raw.includes('sdk load')) {
+      friendly = 'something\'s off with my brain. try restarting clawd?';
+    } else {
+      friendly = "hmm, something went sideways. try again?";
+    }
+    addMessage('crab', friendly);
     currentReplyEl = null;
   } else if (piece.type === 'done') {
     currentReplyEl = null;

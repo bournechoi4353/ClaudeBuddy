@@ -22,7 +22,6 @@
     }
     #chat {
       position: absolute;
-      display: none;
       background: #f5f0e6;
       border: 2px solid #000;
       box-shadow: 4px 4px 0 #000;
@@ -32,8 +31,16 @@
       color: #000;
       box-sizing: border-box;
       z-index: 10;
+      opacity: 0;
+      transform: translateY(6px);
+      pointer-events: none;
+      transition: opacity 130ms ease-out, transform 130ms ease-out;
     }
-    #chat.open { display: block; }
+    #chat.open {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
     #history {
       max-height: 140px;
       overflow-y: auto;

@@ -22,11 +22,26 @@
   sleepMin.value = prefs.sleepMinutes != null ? prefs.sleepMinutes : 3;
   sleepMinVal.textContent = sleepMin.value;
 
-  // Color picker only matters when the Custom skin is selected.
+  // Swatch shown next to the skin dropdown — matches the chosen skin's body color.
+  const skinSwatch = $('skinSwatch');
+  const SKIN_COLORS = {
+    default: '#CC785C',
+    hacker: '#1AAF5D',
+    ghost: '#F5F5F5',
+    sushi: '#E8769A',
+    royal: '#7B5BAD',
+    boba: '#D4A574',
+    cyberpunk: '#FF1493',
+    shadow: '#2C2C2C',
+  };
+
+  // Color picker only matters when the Custom skin is selected. Swatch reflects
+  // either the preset color or the user's custom pick.
   function refreshColorState() {
     const isCustom = skin.value === 'custom';
     color.disabled = !isCustom;
     color.style.opacity = isCustom ? '1' : '0.4';
+    skinSwatch.style.background = isCustom ? color.value : (SKIN_COLORS[skin.value] || '#CC785C');
   }
   refreshColorState();
 
@@ -41,6 +56,9 @@
   skin.addEventListener('change', () => {
     window.crabAPI.setPref({ skin: skin.value });
     refreshColorState();
+  });
+  color.addEventListener('input', () => {
+    if (skin.value === 'custom') skinSwatch.style.background = color.value;
   });
   speed.addEventListener('input', () => {
     speedVal.textContent = parseFloat(speed.value).toFixed(1);

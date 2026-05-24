@@ -189,13 +189,23 @@ function osascriptOnce(script) {
 
 function startAppSwitchWatcher(win) {
   let lastFront = null;
+  let lastReactionAt = 0;
+  const REACTION_MIN_GAP_MS = 20_000; // don't spam the user when they alt-tab a lot
   setInterval(async () => {
     try {
       const front = await osascriptOnce(
         'tell application "System Events" to return name of first application process whose frontmost is true'
       );
-      if (lastFront !== null && front && front !== lastFront && !win.isDestroyed()) {
+      const now = Date.now();
+      if (
+        lastFront !== null &&
+        front &&
+        front !== lastFront &&
+        now - lastReactionAt > REACTION_MIN_GAP_MS &&
+        !win.isDestroyed()
+      ) {
         win.webContents.send('clawd-react', { type: 'app-switch', app: front });
+        lastReactionAt = now;
       }
       lastFront = front;
     } catch (_) {
@@ -316,12 +326,33 @@ function disconnectGoogle() {
   rebuildTrayMenu();
 }
 
+function showAbout() {
+  const spotifyOn = !!prefs.spotifyRefreshToken;
+  const googleOn = !!prefs.googleRefreshToken;
+  dialog.showMessageBox({
+    type: 'info',
+    message: `Clawd ${app.getVersion()}`,
+    detail:
+      'A pixel-art Claude pet for your desktop.\n\n' +
+      `Spotify:  ${spotifyOn ? 'connected' : 'not connected'}\n` +
+      `Google:   ${googleOn ? 'connected' : 'not connected'}\n` +
+      `Personality: ${prefs.personality || 'default'}\n` +
+      `Skin: ${prefs.skin || 'default'}\n\n` +
+      'Source + updates: github.com/bournechoi4353/ClaudeBuddy',
+    buttons: ['OK', 'Open GitHub'],
+    defaultId: 0,
+  }).then((r) => {
+    if (r.response === 1) shell.openExternal('https://github.com/bournechoi4353/ClaudeBuddy');
+  });
+}
+
 function rebuildTrayMenu() {
   const launchAtLogin = app.getLoginItemSettings().openAtLogin;
   const monitorItems = buildMonitorSubmenu();
   const spotifyConnected = !!prefs.spotifyRefreshToken;
   const menu = Menu.buildFromTemplate([
     { label: 'Preferences…', click: openPreferencesWindow },
+    { label: 'About Clawd', click: showAbout },
     { type: 'separator' },
     { label: 'Reset conversation', click: () => agent.reset() },
     { label: 'Size', submenu: buildSizeSubmenu() },
