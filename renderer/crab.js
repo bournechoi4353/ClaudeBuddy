@@ -101,8 +101,12 @@ if (window.crabAPI && window.crabAPI.onPrefsUpdated) {
   window.crabAPI.onPrefsUpdated(applyPrefs);
 }
 
-let posX = 0;
-let dir = 1;
+// Initial position: random somewhere across the bottom strip, random
+// direction. Beats always-spawning-at-the-left-edge.
+let posX = canvas.width > 0
+  ? Math.floor(Math.random() * Math.max(0, canvas.width - 200))
+  : 0;
+let dir = Math.random() < 0.5 ? -1 : 1;
 let SPEED = 0.5; // live-updated from prefs window
 let externallyPaused = false; // chat open
 
@@ -370,14 +374,25 @@ function maybeShowIdleThought(now) {
   nextThoughtAt = now + 6 * 60_000 + Math.random() * 10 * 60_000;
 }
 
-// Timer-end alert from main process: hop, show the label as a bubble, count
-// as an interaction (wakes Clawd if he was sleeping).
+// Timer-end alert. Persistent: keeps hopping every ~1.2s and bubble stays
+// visible until the user clicks Clawd (handled in the mousedown listener) or
+// 60 seconds elapse. A single hop got lost in the user's peripheral vision.
+let timerAlertActive = false;
+let timerAlertExpiresAt = 0;
+let lastTimerAlertJumpAt = 0;
+function clearTimerAlert() {
+  timerAlertActive = false;
+  activeThought = null;
+}
 if (window.crabAPI && window.crabAPI.onTimerEnded) {
   window.crabAPI.onTimerEnded((info) => {
     noteInteraction();
-    triggerReact();
     const label = info && info.label ? info.label : 'timer';
-    showThought(`ding! ${label} done`, 7000);
+    timerAlertActive = true;
+    timerAlertExpiresAt = performance.now() + 60_000;
+    lastTimerAlertJumpAt = performance.now();
+    triggerReact();
+    showThought(`time's up — ${label} (click me)`, 60_000);
   });
 }
 
@@ -561,6 +576,16 @@ function tick() {
   // Idle thoughts.
   maybeShowIdleThought(now);
 
+  // Persistent timer alert — keep hopping every ~1.2s until acknowledged.
+  if (timerAlertActive) {
+    if (now > timerAlertExpiresAt) {
+      clearTimerAlert();
+    } else if (now - lastTimerAlertJumpAt > 1200) {
+      triggerReact();
+      lastTimerAlertJumpAt = now;
+    }
+  }
+
   if (!externallyPaused && !isSleeping) {
     if (now >= stateUntil) pickNextBehavior();
 
@@ -643,6 +668,7 @@ document.addEventListener('mousedown', (e) => {
     return;
   }
   if (isOverCrab(e.clientX, e.clientY)) {
+    if (timerAlertActive) clearTimerAlert(); // clicking acknowledges the alarm
     triggerReact(); // small visible hop on click
     window.Chat.open(currentBbox());
   }

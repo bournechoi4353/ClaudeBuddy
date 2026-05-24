@@ -357,8 +357,15 @@ function rebuildTrayMenu() {
 }
 
 function createTray() {
-  tray = new Tray(nativeImage.createEmpty());
-  tray.setTitle('clawd');
+  const iconPath = path.join(__dirname, 'renderer', 'tray-icon.png');
+  let icon;
+  try {
+    icon = nativeImage.createFromPath(iconPath);
+    icon.setTemplateImage(true); // adapts to light/dark menubar automatically
+  } catch (_) {
+    icon = nativeImage.createEmpty();
+  }
+  tray = new Tray(icon);
   tray.setToolTip('Clawd');
   rebuildTrayMenu();
 }
