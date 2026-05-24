@@ -75,6 +75,9 @@ function applyPrefs(p) {
   if (typeof p.sleepMinutes === 'number' && p.sleepMinutes > 0) {
     SLEEP_AFTER_MS = p.sleepMinutes * 60 * 1000;
   }
+  // Personality affects both voice (in agent.js) AND behavior (here).
+  const personalityId = p.personality || 'default';
+  personalityBehavior = PERSONALITY_BEHAVIOR[personalityId] || PERSONALITY_BEHAVIOR.default;
   // Skin selection drives both body and eye colors AND any permanent accessory.
   // "custom" (or unset) defers to prefs.crabColor for the body and keeps eyes black.
   const skinId = p.skin || 'custom';
@@ -125,6 +128,12 @@ let walkFrame = 0;
 let lastStep = 0;
 const STEP_MS = 220;
 
+// Sleep state — declared early because scheduleBlink() below reads isDrowsy
+// at module load (calling order: definitions → first call → tick loop).
+let isSleeping = false;
+let isDrowsy = false;
+let yawnTriggered = false;
+
 // Behavior state machine — gives Clawd unpredictable personality instead of
 // just bouncing left/right forever. Each state has a duration; on expiry the
 // next state is picked probabilistically.
@@ -145,6 +154,19 @@ function setState(state, durationMs) {
   stateUntil = stateStartedAt + durationMs;
 }
 
+// Personality-driven behavior weights. Each preset reshapes how often Clawd
+// rests, scuttles, flips direction, and how fast he walks. Picked up from
+// prefs.personality via applyPrefs.
+const PERSONALITY_BEHAVIOR = {
+  default: { speedMul: 1.0, idleChance: 0.25, scuttleChance: 0.10, idleDurationMul: 1.0, blinkIntervalMul: 1.0, flipChance: 0.25 },
+  sleepy:  { speedMul: 0.6, idleChance: 0.50, scuttleChance: 0.03, idleDurationMul: 1.8, blinkIntervalMul: 0.6, flipChance: 0.15 },
+  excited: { speedMul: 1.6, idleChance: 0.08, scuttleChance: 0.35, idleDurationMul: 0.5, blinkIntervalMul: 1.5, flipChance: 0.40 },
+  zen:     { speedMul: 0.8, idleChance: 0.35, scuttleChance: 0.05, idleDurationMul: 1.6, blinkIntervalMul: 1.0, flipChance: 0.08 },
+  snarky:  { speedMul: 1.1, idleChance: 0.20, scuttleChance: 0.15, idleDurationMul: 0.7, blinkIntervalMul: 1.0, flipChance: 0.35 },
+  formal:  { speedMul: 0.95, idleChance: 0.22, scuttleChance: 0.00, idleDurationMul: 1.0, blinkIntervalMul: 1.0, flipChance: 0.12 },
+};
+let personalityBehavior = PERSONALITY_BEHAVIOR.default;
+
 function pickNextBehavior() {
   // Returning from a stop: resume walking, sometimes flipped.
   if (
@@ -152,7 +174,7 @@ function pickNextBehavior() {
     behaviorState === ST.STRETCH ||
     behaviorState === ST.BOUNCE_PAUSE
   ) {
-    if (Math.random() < 0.35) dir = -dir;
+    if (Math.random() < (personalityBehavior.flipChance + 0.1)) dir = -dir;
     setState(ST.WALK, 4000 + Math.random() * 6000);
     return;
   }
@@ -160,21 +182,26 @@ function pickNextBehavior() {
     setState(ST.WALK, 3000 + Math.random() * 4000);
     return;
   }
-  // From WALK, pick a new mood.
+  // From WALK, pick a new mood, weighted by personality.
+  const pb = personalityBehavior;
   const r = Math.random();
-  if (r < 0.25)      setState(ST.IDLE,    1500 + Math.random() * 3000);
-  else if (r < 0.35) setState(ST.STRETCH, 700  + Math.random() * 400);
-  else if (r < 0.45) setState(ST.SCUTTLE, 1500 + Math.random() * 2000);
+  const stretchCutoff = pb.idleChance + 0.10;
+  const scuttleCutoff = stretchCutoff + pb.scuttleChance;
+  if (r < pb.idleChance) setState(ST.IDLE, (1500 + Math.random() * 3000) * pb.idleDurationMul);
+  else if (r < stretchCutoff) setState(ST.STRETCH, 700 + Math.random() * 400);
+  else if (r < scuttleCutoff) setState(ST.SCUTTLE, 1500 + Math.random() * 2000);
   else {
-    if (Math.random() < 0.25) dir = -dir; // sometimes turn around mid-stride
+    if (Math.random() < pb.flipChance) dir = -dir;
     setState(ST.WALK, 2000 + Math.random() * 4000);
   }
 }
 
 function stateSpeed() {
-  if (behaviorState === ST.WALK) return SPEED;
-  if (behaviorState === ST.SCUTTLE) return SPEED * 2;
-  return 0;
+  let base = 0;
+  if (behaviorState === ST.WALK) base = SPEED;
+  else if (behaviorState === ST.SCUTTLE) base = SPEED * 2;
+  const mul = (personalityBehavior.speedMul || 1.0) * (isDrowsy ? 0.5 : 1.0);
+  return base * mul;
 }
 
 function stateStepMs() {
@@ -190,19 +217,33 @@ let eyesClosed = false;
 let nextBlink = 0;
 let blinkUntil = 0;
 function scheduleBlink(t) {
-  nextBlink = t + 2500 + Math.random() * 3500;
+  // Faster blinks when drowsy, slower for sleepy personality, faster for excited.
+  const base = 2500 + Math.random() * 3500;
+  const personalityMul = personalityBehavior.blinkIntervalMul || 1.0;
+  const drowsyMul = isDrowsy ? 0.3 : 1.0;
+  nextBlink = t + (base / personalityMul) * drowsyMul;
 }
 scheduleBlink(performance.now());
 
-// Sleep — after N ms of no chat interaction, Clawd dozes off.
-// Backed by prefs.sleepMinutes; live-updated from the Preferences window.
+// Sleep — after N ms of no chat interaction, Clawd dozes off. The transition
+// is graduated: AWAKE → DROWSY (last 3s before sleep, slower walks + faster
+// blinks + a yawn bubble) → ASLEEP. Waking from sleep plays a quick stretch.
+// (isSleeping/isDrowsy/yawnTriggered are declared earlier — scheduleBlink
+// references isDrowsy at module-load time.)
 let SLEEP_AFTER_MS = 3 * 60 * 1000;
+const DROWSY_LEAD_MS = 3000;
 let lastInteractionAt = performance.now();
-let isSleeping = false;
 function noteInteraction() {
+  const wasSleeping = isSleeping;
   lastInteractionAt = performance.now();
   isSleeping = false;
-  zParticles.length = 0; // clear floating z's on wake
+  isDrowsy = false;
+  yawnTriggered = false;
+  zParticles.length = 0;
+  if (wasSleeping) {
+    setState(ST.STRETCH, 1000);
+    showThought('*stretches*', 1400);
+  }
 }
 
 // Floating "Z" particles emitted while sleeping. Each rises and fades.
@@ -564,9 +605,24 @@ function tick() {
   const dtMs = Math.min(50, now - lastTickAt); // clamp dt so tab-switch returns don't teleport particles
   lastTickAt = now;
 
-  // Update sleep state every tick.
+  // Sleep state machine: AWAKE → DROWSY (last 3s before sleep) → ASLEEP.
   if (!externallyPaused) {
-    isSleeping = now - lastInteractionAt > SLEEP_AFTER_MS;
+    const timeIdle = now - lastInteractionAt;
+    if (timeIdle > SLEEP_AFTER_MS) {
+      isSleeping = true;
+      isDrowsy = false;
+    } else if (timeIdle > SLEEP_AFTER_MS - DROWSY_LEAD_MS) {
+      isSleeping = false;
+      isDrowsy = true;
+      if (!yawnTriggered) {
+        yawnTriggered = true;
+        showThought('*yawn*', 1800);
+      }
+    } else {
+      isSleeping = false;
+      isDrowsy = false;
+      yawnTriggered = false;
+    }
   }
 
   // Sleep visuals.
