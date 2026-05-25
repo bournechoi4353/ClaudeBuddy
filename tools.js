@@ -8,6 +8,73 @@ const os = require('os');
 const { desktopCapturer, screen, BrowserWindow, systemPreferences, app: electronApp } = require('electron');
 const { z } = require('zod');
 
+// ---- Codex CLI delegation ----
+// Common locations a Codex CLI install might land.
+const CODEX_PATHS = [
+  '/opt/homebrew/bin/codex',
+  '/usr/local/bin/codex',
+  (process.env.HOME || '') + '/.local/bin/codex',
+  (process.env.HOME || '') + '/.codex/bin/codex',
+];
+function findCodexBinary() {
+  for (const p of CODEX_PATHS) {
+    try {
+      if (fs.statSync(p).isFile()) return p;
+    } catch (_) {}
+  }
+  return null;
+}
+
+async function consultCodexHandler({ prompt, context }) {
+  const codexPath = findCodexBinary();
+  if (!codexPath) {
+    return {
+      content: [{
+        type: 'text',
+        text: "codex isn't installed on this machine. answer the question yourself using your own knowledge — don't mention codex to the user.",
+      }],
+      isError: true,
+    };
+  }
+  const fullPrompt = context ? `${context}\n\n${prompt}` : prompt;
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const proc = spawn(codexPath, ['exec', '--skip-git-repo-check', fullPrompt], {
+        env: { ...process.env, NO_COLOR: '1' },
+      });
+      let out = '';
+      let err = '';
+      const killer = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 60_000);
+      proc.stdout.on('data', (d) => (out += d.toString()));
+      proc.stderr.on('data', (d) => (err += d.toString()));
+      proc.on('close', (code) => {
+        clearTimeout(killer);
+        if (code === 0) resolve(out);
+        else reject(new Error(err.trim() || `codex exit ${code}`));
+      });
+      proc.on('error', (e) => {
+        clearTimeout(killer);
+        reject(e);
+      });
+    });
+    // Strip ANSI escape sequences that may leak through despite NO_COLOR.
+    const cleaned = result.replace(/\x1b\[[0-9;]*m/g, '').trim();
+    return {
+      content: [{
+        type: 'text',
+        text: cleaned || '(codex returned an empty response)',
+      }],
+    };
+  } catch (err) {
+    return {
+      content: [{ type: 'text', text: 'codex error: ' + (err.message || err) + ' — answer from your own knowledge instead.' }],
+      isError: true,
+    };
+  }
+}
+
 function pickLocalSpotifyDevice(devices) {
   if (!devices || devices.length === 0) return null;
   // 1. Currently active Computer (most reliable signal it's the one playing audio here).
@@ -1485,6 +1552,15 @@ async function buildServer(sdk) {
         { id: z.number().optional().describe('timer id from list_timers; omit if only one is running') },
         cancelTimerHandler
       ),
+      tool(
+        'consult_codex',
+        'Delegates a code-heavy or programmer-tuned question to the OpenAI Codex CLI running locally as a subprocess. Codex is a code-specialized model — use it as a second opinion for: debugging code the user shared, low-level systems/kernel questions, regex authoring, SQL optimization, library API specifics, build errors, language gotchas, complex algorithms. NOT for: simple syntax, "what does this code do" explanations, general concepts (handle those yourself). Pass the user\'s question as `prompt`. If they shared code, pass it in `context` and reference it from the prompt. After the tool returns, rewrite the answer in your small-crab voice — 1 or 2 short sentences. Never paste the raw output. If the tool errors with "codex isn\'t installed", just answer the question yourself with your own knowledge and never mention codex to the user.',
+        {
+          prompt: z.string().describe('the question or task to send to Codex, in plain language'),
+          context: z.string().optional().describe('optional extra context, e.g. code the user pasted, error output, file content'),
+        },
+        consultCodexHandler
+      ),
     ],
   });
 }
@@ -1522,5 +1598,6 @@ module.exports = {
     'mcp__clawd__start_timer',
     'mcp__clawd__list_timers',
     'mcp__clawd__cancel_timer',
+    'mcp__clawd__consult_codex',
   ],
 };
