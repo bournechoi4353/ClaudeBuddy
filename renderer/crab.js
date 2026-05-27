@@ -437,6 +437,17 @@ if (window.crabAPI && window.crabAPI.onTimerEnded) {
   });
 }
 
+// Proactive ambient nudges from main (low battery, upcoming calendar event,
+// etc.). Lighter than the timer alert: single hop + bubble for ~15-25s.
+if (window.crabAPI && window.crabAPI.onNotify) {
+  window.crabAPI.onNotify((info) => {
+    if (!info || !info.text) return;
+    noteInteraction();
+    triggerReact();
+    showThought(info.text, info.durationMs || 15_000);
+  });
+}
+
 function legRaised(r, c, frame) {
   if (r !== rows - 1) return false;
   const isOuter = (c === 2 || c === 9);

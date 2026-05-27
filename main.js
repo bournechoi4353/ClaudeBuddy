@@ -49,6 +49,114 @@ tools.setTimerEndCallback(({ id, label }) => {
   }
 });
 
+// ---- Proactive monitor ----
+// Polls every 60s for ambient events that warrant a small unprompted reaction
+// from Clawd: low battery, calendar events starting in ~5 min. Each alert is
+// de-duplicated so the same event never fires twice.
+const notifiedBatteryThresholds = new Set();
+const notifiedCalendarEventIds = new Set();
+
+function sendNotify(text, durationMs) {
+  if (!mainWin || mainWin.isDestroyed()) return;
+  mainWin.webContents.send('clawd-notify', { text, durationMs: durationMs || 15000 });
+}
+
+function runCmd(cmd, args) {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args);
+    let out = '';
+    p.stdout.on('data', (d) => (out += d.toString()));
+    p.on('close', () => resolve(out));
+    p.on('error', () => resolve(''));
+  });
+}
+
+async function checkBattery() {
+  const out = await runCmd('pmset', ['-g', 'batt']);
+  // Lines look like: " -InternalBattery-0 (id=...)\t75%; discharging; X:XX remaining ..."
+  const m = out.match(/(\d+)%;\s*([a-zA-Z ]+?);/);
+  if (!m) return;
+  const pct = parseInt(m[1], 10);
+  const state = m[2].toLowerCase().trim();
+  // Reset alerts whenever we're not on battery (plug-in cancels low-battery warnings).
+  if (state !== 'discharging') {
+    notifiedBatteryThresholds.clear();
+    return;
+  }
+  // Re-arm higher thresholds if charge climbed back above them (e.g. brief plug-in).
+  if (pct > 25) notifiedBatteryThresholds.clear();
+  const thresholds = [
+    { at: 20, text: 'battery at 20%. charger soon would be nice.' },
+    { at: 10, text: 'battery at 10%! plug me in.' },
+    { at: 5,  text: 'battery at 5%!! plug in now!' },
+  ];
+  for (const t of thresholds) {
+    if (pct <= t.at && !notifiedBatteryThresholds.has(t.at)) {
+      notifiedBatteryThresholds.add(t.at);
+      sendNotify(t.text, 20000);
+      return;
+    }
+  }
+}
+
+async function isCalendarRunning() {
+  try {
+    const out = await runCmd('osascript', ['-e', 'tell application "System Events" to count (every process whose name is "Calendar")']);
+    return parseInt(out.trim(), 10) > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function checkCalendarSoon() {
+  // Only poll Calendar.app if the user already has it running — never auto-launch
+  // it on the user's behalf, that would be intrusive.
+  if (!(await isCalendarRunning())) return;
+  // Events starting in the next 6 minutes (so the first 60s tick after the
+  // 5-min mark is crossed will fire one alert per event, and only once).
+  const script = `set output to ""
+tell application "Calendar"
+set startDate to current date
+set endDate to startDate + 360
+repeat with cal in calendars
+try
+set evs to (every event of cal whose start date is greater than or equal to startDate and start date is less than or equal to endDate)
+repeat with ev in evs
+set output to output & (uid of ev) & "|||" & (summary of ev as text) & linefeed
+end repeat
+end try
+end repeat
+end tell
+return output`;
+  const out = await runCmd('osascript', ['-e', script]);
+  if (!out.trim()) return;
+  const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const idx = line.indexOf('|||');
+    if (idx < 0) continue;
+    const uid = line.slice(0, idx);
+    const title = line.slice(idx + 3);
+    if (!uid || notifiedCalendarEventIds.has(uid)) continue;
+    notifiedCalendarEventIds.add(uid);
+    sendNotify(`"${title}" starts in 5 min`, 25000);
+  }
+  // Keep the de-dup set bounded — events past will never come back through
+  // the 6-minute window, so a periodic clear is safe.
+  if (notifiedCalendarEventIds.size > 500) notifiedCalendarEventIds.clear();
+}
+
+let proactiveTimer = null;
+function startProactiveMonitor() {
+  if (proactiveTimer) return;
+  const tick = async () => {
+    try { await checkBattery(); } catch (_) {}
+    try { await checkCalendarSoon(); } catch (_) {}
+  };
+  // First tick after 10s so the renderer is mounted, then every 60s.
+  setTimeout(tick, 10_000);
+  proactiveTimer = setInterval(tick, 60_000);
+}
+
 function maybeShowClaudeOnboarding() {
   const credsPath = path.join(os.homedir(), '.claude', '.credentials.json');
   if (fs.existsSync(credsPath)) return;
@@ -420,6 +528,7 @@ app.whenReady().then(() => {
   createMainWindow(screen.getPrimaryDisplay());
   createTray();
   watchDisplayChanges();
+  startProactiveMonitor();
 });
 
 app.on('window-all-closed', () => {

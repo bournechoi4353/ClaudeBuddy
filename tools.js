@@ -15,6 +15,8 @@ const CODEX_PATHS = [
   '/usr/local/bin/codex',
   (process.env.HOME || '') + '/.local/bin/codex',
   (process.env.HOME || '') + '/.codex/bin/codex',
+  // Codex desktop app bundles the CLI inside its Resources directory.
+  '/Applications/Codex.app/Contents/Resources/codex',
 ];
 function findCodexBinary() {
   for (const p of CODEX_PATHS) {
@@ -41,6 +43,7 @@ async function consultCodexHandler({ prompt, context }) {
     const result = await new Promise((resolve, reject) => {
       const proc = spawn(codexPath, ['exec', '--skip-git-repo-check', fullPrompt], {
         env: { ...process.env, NO_COLOR: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
       let out = '';
       let err = '';
