@@ -5,7 +5,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { desktopCapturer, screen, BrowserWindow, systemPreferences, app: electronApp } = require('electron');
+const { desktopCapturer, screen, BrowserWindow, systemPreferences, clipboard, app: electronApp } = require('electron');
 const { z } = require('zod');
 
 // ---- Codex CLI delegation ----
@@ -97,6 +97,22 @@ function pickLocalSpotifyDevice(devices) {
   if (anyComputer) return anyComputer;
   // 4. Last resort — first device of any type.
   return devices[0];
+}
+
+// ---- Clipboard ----
+async function readClipboardHandler() {
+  const text = clipboard.readText();
+  if (!text) return { content: [{ type: 'text', text: 'clipboard is empty' }] };
+  const trimmed = text.length > 5000 ? text.slice(0, 5000) + '\n…(truncated)' : text;
+  return { content: [{ type: 'text', text: trimmed }] };
+}
+
+async function setClipboardHandler({ text }) {
+  if (typeof text !== 'string' || text.length === 0) {
+    return { content: [{ type: 'text', text: 'need some text to copy' }], isError: true };
+  }
+  clipboard.writeText(text);
+  return { content: [{ type: 'text', text: 'copied to clipboard' }] };
 }
 
 // Re-read prefs every few seconds so the user can drop in Spotify credentials
@@ -1643,6 +1659,18 @@ async function buildServer(sdk) {
         cancelTimerHandler
       ),
       tool(
+        'read_clipboard',
+        'Reads the current text content of the macOS clipboard. Use when the user says "what did i copy", "what\'s on my clipboard", "read my clipboard", "translate my clipboard", "save what i copied as a note". Returns the clipboard text (truncated to 5000 chars).',
+        {},
+        readClipboardHandler
+      ),
+      tool(
+        'set_clipboard',
+        'Writes text to the macOS clipboard, replacing whatever was there. Use when the user says "copy this", "put X on my clipboard", "save this to clipboard so i can paste it".',
+        { text: z.string().describe('the text to put on the clipboard') },
+        setClipboardHandler
+      ),
+      tool(
         'consult_codex',
         'Delegates a code-heavy or programmer-tuned question to the OpenAI Codex CLI running locally as a subprocess. Codex is a code-specialized model — use it as a second opinion for: debugging code the user shared, low-level systems/kernel questions, regex authoring, SQL optimization, library API specifics, build errors, language gotchas, complex algorithms. NOT for: simple syntax, "what does this code do" explanations, general concepts (handle those yourself). Pass the user\'s question as `prompt`. If they shared code, pass it in `context` and reference it from the prompt. After the tool returns, rewrite the answer in your small-crab voice — 1 or 2 short sentences. Never paste the raw output. If the tool errors with "codex isn\'t installed", just answer the question yourself with your own knowledge and never mention codex to the user.',
         {
@@ -1690,5 +1718,7 @@ module.exports = {
     'mcp__clawd__list_timers',
     'mcp__clawd__cancel_timer',
     'mcp__clawd__consult_codex',
+    'mcp__clawd__read_clipboard',
+    'mcp__clawd__set_clipboard',
   ],
 };

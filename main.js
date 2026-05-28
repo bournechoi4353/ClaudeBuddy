@@ -323,6 +323,23 @@ ipcMain.on('set-ignore-mouse', (_event, ignore) => {
 });
 
 ipcMain.on('chat-send', async (event, text) => {
+  // First-launch naming ceremony — the very first chat message is interpreted
+  // as the pet's new name, not as a question for the agent. Validates to
+  // lowercase alphanumeric/_/- only, 1-20 chars, falls back to "clawd".
+  if (!prefs.hasOnboarded) {
+    let name = (text || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20);
+    if (!name) name = 'clawd';
+    prefs.petName = name;
+    prefs.hasOnboarded = true;
+    savePrefs(prefs);
+    if (!event.sender.isDestroyed()) {
+      // Push the new petName into renderer prefs so the crab UI updates.
+      event.sender.send('prefs-updated', { petName: name });
+      event.sender.send('chat-piece', { type: 'chunk', text: `${name}. nice name. ask me anything.` });
+      event.sender.send('chat-piece', { type: 'done' });
+    }
+    return;
+  }
   try {
     for await (const piece of agent.chat(text)) {
       if (event.sender.isDestroyed()) break;

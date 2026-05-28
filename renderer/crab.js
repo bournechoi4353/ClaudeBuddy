@@ -97,8 +97,21 @@ function applyPrefs(p) {
     currentSkinAccessoryColor = null;
   }
 }
+// First-launch naming ceremony: when prefs.hasOnboarded is false, auto-open
+// the chat panel a couple seconds after the crab appears so the user can name
+// him. The "what should i be called" message lives in chat.js (it checks
+// onboardingActive when it renders the panel's first message).
+let onboardingActive = false;
 if (window.crabAPI && window.crabAPI.getPrefs) {
-  window.crabAPI.getPrefs().then(applyPrefs).catch(() => {});
+  window.crabAPI.getPrefs().then((p) => {
+    applyPrefs(p);
+    if (p && p.hasOnboarded !== true) {
+      onboardingActive = true;
+      setTimeout(() => {
+        if (window.Chat) window.Chat.open(currentBbox());
+      }, 1800);
+    }
+  }).catch(() => {});
 }
 if (window.crabAPI && window.crabAPI.onPrefsUpdated) {
   window.crabAPI.onPrefsUpdated(applyPrefs);
@@ -513,7 +526,21 @@ function legRaised(r, c, frame) {
   return false;
 }
 
+// Drag state. While dragging, the crab's bbox tracks the cursor (minus the
+// grab anchor) instead of the floor position.
+let isDragging = false;
+let dragPressed = false; // mousedown over crab; not yet past drag threshold
+let dragStartX = 0, dragStartY = 0;
+let dragGrabOffsetX = 0, dragGrabOffsetY = 0;
+let dragCursorX = 0, dragCursorY = 0;
+const DRAG_THRESHOLD = 5;
+
 function currentBbox() {
+  if (isDragging) {
+    const x = Math.max(0, Math.min(canvas.width - crabW, Math.round(dragCursorX - dragGrabOffsetX)));
+    const y = Math.max(0, Math.min(canvas.height - crabH, Math.round(dragCursorY - dragGrabOffsetY)));
+    return { x, y, w: crabW, h: crabH };
+  }
   return {
     x: Math.floor(posX),
     y: canvas.height - crabH - 1,
@@ -768,7 +795,9 @@ function refreshMouseRegion() {
   const overCrab = isOverCrab(lastMouseX, lastMouseY);
   isHovered = overCrab;
   const overChat = window.Chat && window.Chat.isOpen() && window.Chat.containsPoint(lastMouseX, lastMouseY);
-  const shouldCapture = overCrab || overChat;
+  // Keep capturing while a drag is in progress (or about to start) so the
+  // mouse doesn't slip out from under us when Clawd moves with the cursor.
+  const shouldCapture = overCrab || overChat || isDragging || dragPressed;
 
   if (shouldCapture !== currentlyCapturing) {
     currentlyCapturing = shouldCapture;
@@ -779,22 +808,72 @@ function refreshMouseRegion() {
 document.addEventListener('mousemove', (e) => {
   lastMouseX = e.clientX;
   lastMouseY = e.clientY;
+  if (dragPressed) {
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    if (!isDragging && (dx * dx + dy * dy) > DRAG_THRESHOLD * DRAG_THRESHOLD) {
+      isDragging = true;
+      externallyPaused = true; // pause walking while held
+    }
+    if (isDragging) {
+      dragCursorX = e.clientX;
+      dragCursorY = e.clientY;
+    }
+  }
   refreshMouseRegion();
 });
 
 document.addEventListener('mousedown', (e) => {
-  // Don't react if the click is inside the chat panel — chat.js handles it.
-  if (window.Chat && window.Chat.isOpen()) {
-    if (window.Chat.containsPoint(e.clientX, e.clientY)) return;
-    // Click outside chat panel: close it.
-    window.Chat.close();
+  // Inside the chat panel — chat.js owns those events.
+  if (window.Chat && window.Chat.isOpen() && window.Chat.containsPoint(e.clientX, e.clientY)) {
     return;
   }
   if (isOverCrab(e.clientX, e.clientY)) {
-    if (timerAlertActive) clearTimerAlert(); // clicking acknowledges the alarm
-    triggerReact(); // small visible hop on click
+    // Start tracking — could turn into a drag (>5px move) or a click (no move).
+    // Crab is grabbable whether the chat panel is open or not; the panel will
+    // follow him via its own spring-tracked position.
+    const b = currentBbox();
+    dragPressed = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    dragGrabOffsetX = e.clientX - b.x;
+    dragGrabOffsetY = e.clientY - b.y;
+    dragCursorX = e.clientX;
+    dragCursorY = e.clientY;
+    noteInteraction();
+    return;
+  }
+  // Mousedown anywhere else with chat open → close the chat.
+  if (window.Chat && window.Chat.isOpen()) {
+    window.Chat.close();
+  }
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (!dragPressed) return;
+  const wasDragging = isDragging;
+  const chatWasOpen = window.Chat && window.Chat.isOpen();
+  if (wasDragging) {
+    // Drop: keep horizontal position from where dropped, snap back to floor.
+    const newX = e.clientX - dragGrabOffsetX;
+    posX = Math.max(0, Math.min(canvas.width - crabW, newX));
+    isDragging = false;
+    dragPressed = false;
+    // Only resume walking if chat wasn't holding the pause — chat owns the
+    // pause when it's open.
+    if (!chatWasOpen) externallyPaused = false;
+    triggerReact(); // tiny landing hop
+    refreshMouseRegion();
+    return;
+  }
+  // Click (no movement past threshold).
+  dragPressed = false;
+  if (isOverCrab(e.clientX, e.clientY) && !chatWasOpen) {
+    if (timerAlertActive) clearTimerAlert();
+    triggerReact();
     window.Chat.open(currentBbox());
   }
+  refreshMouseRegion();
 });
 
 document.addEventListener('keydown', (e) => {
@@ -814,6 +893,8 @@ window.Crab = {
   clearAccessory,
   setListening,
   dance: startDancing,
+  isOnboarding: () => onboardingActive,
+  endOnboarding: () => { onboardingActive = false; },
 };
 
 tick();

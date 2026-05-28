@@ -7,7 +7,17 @@ const inputEl = document.getElementById('input');
 
 const PANEL_W = 240;
 const PANEL_MARGIN = 8;
-const NAME = 'clawd';
+let NAME = 'clawd';
+if (window.crabAPI && window.crabAPI.getPrefs) {
+  window.crabAPI.getPrefs().then((p) => {
+    if (p && typeof p.petName === 'string' && p.petName) NAME = p.petName;
+  }).catch(() => {});
+}
+if (window.crabAPI && window.crabAPI.onPrefsUpdated) {
+  window.crabAPI.onPrefsUpdated((p) => {
+    if (p && typeof p.petName === 'string' && p.petName) NAME = p.petName;
+  });
+}
 
 let isOpen = false;
 let currentReplyEl = null;
@@ -60,40 +70,80 @@ window.crabAPI.onChatPiece((piece) => {
   }
 });
 
+// Spring-physics tracking. The panel chases Clawd's current bbox each frame
+// with a stiff-but-springy feel — when he's dragged or hops, the panel lags
+// slightly behind, then settles with a tiny overshoot so the motion looks
+// alive instead of glued.
+let panelX = 0, panelY = 0;
+let velX = 0, velY = 0;
+let trackRAF = 0;
+const SPRING_K = 0.22;   // higher = catches up faster
+const SPRING_D = 0.74;   // lower  = more overshoot/bounce
+
+function targetForBbox(crabBbox) {
+  let tx = crabBbox.x + crabBbox.w / 2 - PANEL_W / 2;
+  if (tx < PANEL_MARGIN) tx = PANEL_MARGIN;
+  if (tx + PANEL_W > window.innerWidth - PANEL_MARGIN) {
+    tx = window.innerWidth - PANEL_W - PANEL_MARGIN;
+  }
+  // ty is the distance from the bottom of the window to the bottom edge of
+  // the panel — anchoring by bottom keeps the panel growing UP as messages
+  // stream in, instead of expanding down into the crab.
+  const ty = window.innerHeight - crabBbox.y + 6;
+  return { tx, ty };
+}
+
+function applyPanelPosition() {
+  chatEl.style.left = Math.round(panelX) + 'px';
+  chatEl.style.top = '';
+  chatEl.style.bottom = Math.round(panelY) + 'px';
+}
+
+function trackTick() {
+  if (!isOpen) { trackRAF = 0; return; }
+  const bbox = window.Crab && window.Crab.getBbox ? window.Crab.getBbox() : null;
+  if (bbox) {
+    const { tx, ty } = targetForBbox(bbox);
+    velX = (velX + (tx - panelX) * SPRING_K) * SPRING_D;
+    velY = (velY + (ty - panelY) * SPRING_K) * SPRING_D;
+    panelX += velX;
+    panelY += velY;
+    applyPanelPosition();
+  }
+  trackRAF = requestAnimationFrame(trackTick);
+}
+
 function open(crabBbox) {
   isOpen = true;
   chatEl.classList.add('open');
-  positionPanel(crabBbox);
+  // Snap to the starting position so the open animation doesn't include a
+  // big spring catch-up from (0,0).
+  const { tx, ty } = targetForBbox(crabBbox);
+  panelX = tx; panelY = ty; velX = 0; velY = 0;
+  applyPanelPosition();
 
   if (historyEl.children.length === 0) {
-    addMessage('crab', "hi. ask me anything.");
+    if (window.Crab && window.Crab.isOnboarding && window.Crab.isOnboarding()) {
+      addMessage('crab', "hi! i'm new here. what should i be called?");
+    } else {
+      addMessage('crab', "hi. ask me anything.");
+    }
   }
 
   window.Crab.pause();
   window.Crab.noteInteraction && window.Crab.noteInteraction();
   setTimeout(() => inputEl.focus(), 0);
+
+  if (!trackRAF) trackRAF = requestAnimationFrame(trackTick);
 }
 
 function close() {
   isOpen = false;
   chatEl.classList.remove('open');
+  if (trackRAF) { cancelAnimationFrame(trackRAF); trackRAF = 0; }
   window.Crab.resume();
   inputEl.value = '';
   inputEl.blur();
-}
-
-function positionPanel(crabBbox) {
-  let x = crabBbox.x + crabBbox.w / 2 - PANEL_W / 2;
-  if (x < PANEL_MARGIN) x = PANEL_MARGIN;
-  if (x + PANEL_W > window.innerWidth - PANEL_MARGIN) {
-    x = window.innerWidth - PANEL_W - PANEL_MARGIN;
-  }
-  // Anchor by bottom so the panel grows upward as messages stream in
-  // instead of expanding down and swallowing the crab.
-  const bottomFromWindowBottom = window.innerHeight - crabBbox.y + 6;
-  chatEl.style.left = x + 'px';
-  chatEl.style.top = '';
-  chatEl.style.bottom = bottomFromWindowBottom + 'px';
 }
 
 function addMessage(who, text) {
@@ -116,6 +166,8 @@ inputEl.addEventListener('keydown', (e) => {
     window.Crab.noteInteraction && window.Crab.noteInteraction();
     window.Crab.setListening && window.Crab.setListening(true);
     window.crabAPI.sendChatMessage(text);
+    // After the user names the crab the panel should behave normally on next open.
+    if (window.Crab && window.Crab.endOnboarding) window.Crab.endOnboarding();
   } else if (e.key === 'Escape') {
     close();
   }
