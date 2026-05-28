@@ -233,6 +233,60 @@ scheduleBlink(performance.now());
 let SLEEP_AFTER_MS = 3 * 60 * 1000;
 const DROWSY_LEAD_MS = 3000;
 let lastInteractionAt = performance.now();
+
+// ---- Time-of-day greeting ----
+// First chat-open or message-send of a session gets a small contextual bubble:
+// "morning", "you're still up?", "back?", etc. Greets again if the user
+// returns after a long absence (>4h) so a multi-day chat doesn't go silent.
+let hasGreetedThisSession = false;
+function pickGreeting(now, lastEpoch) {
+  const hour = now.getHours();
+  const gapHours = lastEpoch ? (now.getTime() - lastEpoch) / 3_600_000 : Infinity;
+  // Late night first — overrides the "morning" range edge cases.
+  if (hour >= 0 && hour < 5) {
+    if (gapHours > 4) return 'oh hey. late one?';
+    return "you're still up?";
+  }
+  if (hour >= 5 && hour < 11 && gapHours > 6) return 'morning.';
+  if (hour >= 11 && hour < 14 && gapHours > 6) return 'back. lunch?';
+  if (hour >= 14 && hour < 18 && gapHours > 6) return 'oh hey. afternoon.';
+  if (hour >= 18 && hour < 22 && gapHours > 6) return 'evening then.';
+  if (hour >= 22 && gapHours > 6) return 'late hello.';
+  if (gapHours > 1 && gapHours <= 6) return 'hey, back.';
+  return null;
+}
+function maybeGreet() {
+  if (hasGreetedThisSession) return;
+  let lastEpoch = null;
+  try {
+    const v = localStorage.getItem('clawd_last_interaction_epoch');
+    if (v) lastEpoch = parseInt(v, 10) || null;
+  } catch (_) {}
+  const now = new Date();
+  const greeting = pickGreeting(now, lastEpoch);
+  // Always update the persisted timestamp, even if we don't greet.
+  try { localStorage.setItem('clawd_last_interaction_epoch', String(now.getTime())); } catch (_) {}
+  if (greeting) {
+    hasGreetedThisSession = true;
+    showThought(greeting, 4000);
+  } else {
+    // First interaction with no qualifying gap still counts as "greeted" so we
+    // don't loop checks every tap. Long absence later in the session will
+    // re-arm via the 4h check below.
+    hasGreetedThisSession = true;
+  }
+}
+// Re-arm greeting whenever the gap since last interaction exceeds 4h, even
+// within a single app session — handles "left clawd running overnight" case.
+function maybeReArmGreeting() {
+  try {
+    const v = localStorage.getItem('clawd_last_interaction_epoch');
+    if (!v) return;
+    const gapH = (Date.now() - parseInt(v, 10)) / 3_600_000;
+    if (gapH > 4) hasGreetedThisSession = false;
+  } catch (_) {}
+}
+
 function noteInteraction() {
   const wasSleeping = isSleeping;
   lastInteractionAt = performance.now();
@@ -244,6 +298,8 @@ function noteInteraction() {
     setState(ST.STRETCH, 1000);
     showThought('*stretches*', 1400);
   }
+  maybeReArmGreeting();
+  maybeGreet();
 }
 
 // Floating "Z" particles emitted while sleeping. Each rises and fades.

@@ -596,6 +596,84 @@ return output`;
   }
 }
 
+async function deleteCalendarEventHandler({ title, start }) {
+  if (!title) {
+    return { content: [{ type: 'text', text: 'need a title (substring is fine)' }], isError: true };
+  }
+  await ensureAppRunning('Calendar');
+  const titleSafe = title.replace(/"/g, '\\"');
+
+  // Optional ±30min window around a provided start time, so the user can say
+  // "delete tomorrow's 3pm sync" without nuking the recurring series.
+  let dateSetup = '';
+  let dateConstraint = '';
+  if (start) {
+    const d = new Date(start);
+    if (isNaN(d.getTime())) {
+      return { content: [{ type: 'text', text: 'invalid start time — use ISO 8601 (e.g. 2026-05-28T15:00:00)' }], isError: true };
+    }
+    const before = new Date(d.getTime() - 30 * 60 * 1000);
+    const after = new Date(d.getTime() + 30 * 60 * 1000);
+    const setDate = (varName, dt) => `set ${varName} to current date
+set year of ${varName} to ${dt.getFullYear()}
+set month of ${varName} to ${dt.getMonth() + 1}
+set day of ${varName} to ${dt.getDate()}
+set hours of ${varName} to ${dt.getHours()}
+set minutes of ${varName} to ${dt.getMinutes()}
+set seconds of ${varName} to 0`;
+    dateSetup = `${setDate('beforeDate', before)}\n${setDate('afterDate', after)}\n`;
+    dateConstraint = ' and start date is greater than or equal to beforeDate and start date is less than or equal to afterDate';
+  }
+
+  const script = `${dateSetup}set deleteTarget to missing value
+set matchCount to 0
+set matchInfo to ""
+tell application "Calendar"
+repeat with cal in calendars
+try
+set evs to (every event of cal whose summary contains "${titleSafe}"${dateConstraint})
+repeat with ev in evs
+set matchCount to matchCount + 1
+set matchInfo to matchInfo & (summary of ev as text) & " | " & ((start date of ev) as text) & " | " & (name of cal) & linefeed
+if matchCount is 1 then
+set deleteTarget to ev
+end if
+end repeat
+end try
+end repeat
+if matchCount is 1 then
+delete deleteTarget
+return "DELETED|||" & matchInfo
+end if
+return "MULTI|||" & matchCount & "|||" & matchInfo
+end tell`;
+  try {
+    const out = await osascriptRun(script);
+    if (out.startsWith('DELETED|||')) {
+      return { content: [{ type: 'text', text: 'deleted: ' + out.slice('DELETED|||'.length).trim() }] };
+    }
+    if (out.startsWith('MULTI|||')) {
+      const rest = out.slice('MULTI|||'.length);
+      const idx = rest.indexOf('|||');
+      const nStr = rest.slice(0, idx);
+      const info = rest.slice(idx + 3).trim();
+      const n = parseInt(nStr, 10);
+      if (n === 0) {
+        return { content: [{ type: 'text', text: `no calendar events matched "${title}"` }] };
+      }
+      return {
+        content: [{
+          type: 'text',
+          text: `${n} events match "${title}" — be more specific (add a start time or a longer title substring). matches:\n${info}`,
+        }],
+      };
+    }
+    return { content: [{ type: 'text', text: 'unexpected calendar response: ' + out }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: 'could not delete: ' + err.message + ' (Calendar permission may be needed)' }], isError: true };
+  }
+}
+
 async function addCalendarEventHandler({ title, start, end, calendar, notes }) {
   if (!title || !start) {
     return { content: [{ type: 'text', text: 'need at least title and start time' }], isError: true };
@@ -1446,6 +1524,15 @@ async function buildServer(sdk) {
         calendarHandler
       ),
       tool(
+        'delete_calendar_event',
+        'Deletes a single event from macOS Calendar by title substring. Use when the user says "delete X from my calendar", "cancel my X meeting", "remove that event". SAFETY: if more than one event matches the title, the tool returns the list of matches and refuses to delete — relay the matches to the user and ask which one (then re-call with a more specific title or with the start time). Always pass `start` as ISO 8601 if the user gave a time, to disambiguate recurring events.',
+        {
+          title: z.string().describe('substring of the event title to delete'),
+          start: z.string().optional().describe('optional ISO 8601 start datetime to narrow to a specific occurrence within ±30 minutes'),
+        },
+        deleteCalendarEventHandler
+      ),
+      tool(
         'add_calendar_event',
         'Creates a new event in macOS Calendar. Use when the user says "add to calendar", "schedule a meeting", "remind me on...". Convert relative times like "tomorrow 3pm" or "next monday" into ISO 8601 yourself, using the current time as reference. If end is omitted, defaults to 1 hour after start.',
         {
@@ -1587,6 +1674,7 @@ module.exports = {
     'mcp__clawd__spotify_search',
     'mcp__clawd__calendar_events',
     'mcp__clawd__add_calendar_event',
+    'mcp__clawd__delete_calendar_event',
     'mcp__clawd__weather',
     'mcp__clawd__get_notes',
     'mcp__clawd__save_note',

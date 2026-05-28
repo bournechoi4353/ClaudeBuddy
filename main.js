@@ -56,8 +56,10 @@ tools.setTimerEndCallback(({ id, label }) => {
 const notifiedBatteryThresholds = new Set();
 const notifiedCalendarEventIds = new Set();
 
+let lastNotifyAt = 0;
 function sendNotify(text, durationMs) {
   if (!mainWin || mainWin.isDestroyed()) return;
+  lastNotifyAt = Date.now();
   mainWin.webContents.send('clawd-notify', { text, durationMs: durationMs || 15000 });
 }
 
@@ -155,6 +157,94 @@ function startProactiveMonitor() {
   // First tick after 10s so the renderer is mounted, then every 60s.
   setTimeout(tick, 10_000);
   proactiveTimer = setInterval(tick, 60_000);
+}
+
+// ---- Idle chatter ----
+// Every 25-45 minutes Clawd bubbles a tiny unprompted thought, weighted by
+// the user's frontmost app and the time of day. Skipped if another notification
+// fired in the last few minutes (so chatter never piles on top of timer/battery
+// alerts) and if we're still inside the post-launch quiet window.
+
+const APP_LINES = {
+  'Code': ['writing something good?', 'all those brackets...', 'i like the syntax colors'],
+  'Visual Studio Code': ['writing something good?', 'all those brackets...', 'i like the syntax colors'],
+  'Cursor': ['the cursor flows', 'tab tab tab', 'writing something good?'],
+  'Google Chrome': ['what are you reading?', '...so many tabs', 'is the internet on?'],
+  'Safari': ['safari kinda vibes', 'what are you reading?', '...nice page'],
+  'Arc': ['arc is fancy', 'what are you reading?'],
+  'Firefox': ['the firefox is foxy'],
+  'Slack': ['the messages, they multiply', 'good luck in there', 'is it that meeting again'],
+  'Discord': ['discord. the chatty one.'],
+  'Spotify': ['this is a good one', 'turn it up?', '...nice tune'],
+  'Figma': ['the colors...', 'i like the layers', 'pixel perfect huh'],
+  'Terminal': ['green on black. classic.', '...that prompt looks crisp'],
+  'iTerm2': ['green on black. classic.', '...that prompt looks crisp'],
+  'Notion': ['so much organization', 'lots of pages'],
+  'Linear': ['the tickets, they accumulate'],
+  'Mail': ['inbox zero is a myth'],
+  'zoom.us': ['meeting again?', 'unmute. always unmute.'],
+  'Calendar': ['what is on the schedule'],
+  'Finder': ['so many folders', '...where did it go'],
+  'Xcode': ['the build is building', 'fingers crossed'],
+};
+
+const TIME_LINES = {
+  morning:   ['it is quiet in the morning', 'tea time?', 'the light is nice this hour'],
+  midday:    ['is it lunch yet', '...stretch break?', 'almost noon'],
+  afternoon: ['the afternoon slump is real', '...iced something?', 'still going strong'],
+  evening:   ['the sky looks orange', 'what is for dinner', 'winding down'],
+  night:     ['it is getting late', 'the city is quieter at night', '...'],
+  late:      ['still up?', 'i am getting sleepy', 'rest soon ok'],
+};
+
+const GENERAL_LINES = [
+  '...just thinking', 'the floor feels nice today', 'tiny gust earlier',
+  'i wonder if other crabs have wifi', '...hmm', 'a small thought, nothing big',
+  'the cursor is so blinky', 'the menubar is full', 'i napped a little',
+  '...is there sand somewhere', 'small claws, big plans',
+];
+
+function timeBucket(d) {
+  const h = d.getHours();
+  if (h >= 5 && h < 10) return 'morning';
+  if (h >= 10 && h < 12) return 'midday';
+  if (h >= 12 && h < 17) return 'afternoon';
+  if (h >= 17 && h < 21) return 'evening';
+  if (h >= 21 || h < 1) return 'night';
+  return 'late';
+}
+
+function pickIdleThought(frontApp) {
+  const pool = [];
+  if (frontApp && APP_LINES[frontApp]) pool.push(...APP_LINES[frontApp], ...APP_LINES[frontApp]);
+  pool.push(...TIME_LINES[timeBucket(new Date())]);
+  pool.push(...GENERAL_LINES);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function startIdleChatter() {
+  const queueNext = () => {
+    const min = 25 * 60 * 1000;
+    const max = 45 * 60 * 1000;
+    const delay = min + Math.floor(Math.random() * (max - min));
+    setTimeout(async () => {
+      // Don't pile on top of a recent battery / calendar / timer bubble.
+      if (Date.now() - lastNotifyAt < 4 * 60 * 1000) {
+        queueNext();
+        return;
+      }
+      let front = '';
+      try {
+        front = (await osascriptOnce(
+          'tell application "System Events" to return name of first application process whose frontmost is true'
+        )).trim();
+      } catch (_) {}
+      sendNotify(pickIdleThought(front), 10000);
+      queueNext();
+    }, delay);
+  };
+  // Quiet for the first 8 minutes after launch so we don't ambush users.
+  setTimeout(queueNext, 8 * 60 * 1000);
 }
 
 function maybeShowClaudeOnboarding() {
@@ -529,6 +619,7 @@ app.whenReady().then(() => {
   createTray();
   watchDisplayChanges();
   startProactiveMonitor();
+  startIdleChatter();
 });
 
 app.on('window-all-closed', () => {
