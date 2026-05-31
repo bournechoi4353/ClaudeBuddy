@@ -988,9 +988,11 @@ document.addEventListener('mouseup', (e) => {
   const wasDragging = isDragging;
   const chatWasOpen = window.Chat && window.Chat.isOpen();
   if (wasDragging) {
+    // Capture the drag bbox BEFORE clearing isDragging — otherwise currentBbox
+    // falls back to the floor position and the fly state starts pre-landed.
+    const b = currentBbox();
     isDragging = false;
     dragPressed = false;
-    const b = currentBbox();
     // Always hand off to physics — gravity makes drops fall naturally, and the
     // settle check inside stepFlyPhysics ends a velocity-less floor release in
     // a single frame, so this also covers the old "place down" path.
