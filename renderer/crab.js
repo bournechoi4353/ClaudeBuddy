@@ -156,6 +156,9 @@ const ST = {
   IDLE: 'idle',           // stands still, planted legs, looking around (blinks)
   STRETCH: 'stretch',     // tiny upward bob arc, no horizontal movement
   BOUNCE_PAUSE: 'bounce', // brief pause after hitting an outer wall
+  NAP: 'nap',             // lays down for ~4s, eyes closed, slow breathing bob
+  DIG: 'dig',             // rapid all-legs flicker, ~1.5s
+  BURROW: 'burrow',       // body sinks into floor and pops back, ~1.5s
 };
 let behaviorState = ST.WALK;
 let stateStartedAt = performance.now();
@@ -185,7 +188,10 @@ function pickNextBehavior() {
   if (
     behaviorState === ST.IDLE ||
     behaviorState === ST.STRETCH ||
-    behaviorState === ST.BOUNCE_PAUSE
+    behaviorState === ST.BOUNCE_PAUSE ||
+    behaviorState === ST.NAP ||
+    behaviorState === ST.DIG ||
+    behaviorState === ST.BURROW
   ) {
     if (Math.random() < (personalityBehavior.flipChance + 0.1)) dir = -dir;
     setState(ST.WALK, 4000 + Math.random() * 6000);
@@ -195,15 +201,35 @@ function pickNextBehavior() {
     setState(ST.WALK, 3000 + Math.random() * 4000);
     return;
   }
-  // From WALK, pick a new mood, weighted by personality.
+  // From WALK, pick a new mood, weighted by personality. Sometimes upgrade
+  // a basic mood to a richer animation so the loop doesn't feel too repetitive.
   const pb = personalityBehavior;
   const r = Math.random();
   const stretchCutoff = pb.idleChance + 0.10;
   const scuttleCutoff = stretchCutoff + pb.scuttleChance;
-  if (r < pb.idleChance) setState(ST.IDLE, (1500 + Math.random() * 3000) * pb.idleDurationMul);
-  else if (r < stretchCutoff) setState(ST.STRETCH, 700 + Math.random() * 400);
-  else if (r < scuttleCutoff) setState(ST.SCUTTLE, 1500 + Math.random() * 2000);
-  else {
+  if (r < pb.idleChance) {
+    // 25% chance an IDLE turns into a NAP. Sleepy personalities nap more.
+    const napChance = pb.speedMul < 0.9 ? 0.45 : 0.20;
+    if (Math.random() < napChance) {
+      setState(ST.NAP, 3500 + Math.random() * 2500);
+    } else {
+      setState(ST.IDLE, (1500 + Math.random() * 3000) * pb.idleDurationMul);
+    }
+  } else if (r < stretchCutoff) {
+    // 20% chance a STRETCH turns into a BURROW.
+    if (Math.random() < 0.20) {
+      setState(ST.BURROW, 1400 + Math.random() * 400);
+    } else {
+      setState(ST.STRETCH, 700 + Math.random() * 400);
+    }
+  } else if (r < scuttleCutoff) {
+    // 30% chance a SCUTTLE turns into a DIG.
+    if (Math.random() < 0.30) {
+      setState(ST.DIG, 1200 + Math.random() * 600);
+    } else {
+      setState(ST.SCUTTLE, 1500 + Math.random() * 2000);
+    }
+  } else {
     if (Math.random() < pb.flipChance) dir = -dir;
     setState(ST.WALK, 2000 + Math.random() * 4000);
   }
@@ -521,6 +547,14 @@ function legRaised(r, c, frame) {
   if (r !== rows - 1) return false;
   const isOuter = (c === 2 || c === 9);
   const isInner = (c === 4 || c === 7);
+  // DIG: all four legs flicker between outer-pair and inner-pair every ~120ms,
+  // much faster than the normal walk cycle.
+  if (behaviorState === ST.DIG) {
+    const digFrame = Math.floor(performance.now() / 120) % 2;
+    if (digFrame === 0 && isOuter) return true;
+    if (digFrame === 1 && isInner) return true;
+    return false;
+  }
   if (frame === 1 && isOuter) return true;
   if (frame === 3 && isInner) return true;
   return false;
@@ -535,11 +569,33 @@ let dragGrabOffsetX = 0, dragGrabOffsetY = 0;
 let dragCursorX = 0, dragCursorY = 0;
 const DRAG_THRESHOLD = 5;
 
+// Velocity sampling for throw physics. We smooth recent mouse motion so that
+// the launch velocity reflects the user's last gesture, not a single noisy
+// final mousemove.
+let lastDragSampleAt = 0;
+let lastDragSampleX = 0, lastDragSampleY = 0;
+let dragVX = 0, dragVY = 0; // px per frame (~16.67ms)
+
+// Throw / fly state. Set when the user releases with enough velocity; the
+// crab then undergoes a parabolic arc with bouncing off floor and walls until
+// energy drains and he settles back into normal walking.
+let isFlying = false;
+let flyX = 0, flyY = 0, flyVX = 0, flyVY = 0;
+const GRAVITY = 0.6;          // px/frame²
+const AIR_FRICTION = 0.995;   // horizontal drag while flying
+const BOUNCE_DAMP = 0.45;     // vertical energy retained per bounce
+const WALL_DAMP = 0.5;        // horizontal energy retained on wall hit
+const FLY_SETTLE_VEL = 1.2;   // below this on landing, settle
+const THROW_VEL_THRESHOLD = 2.5; // px/frame; below this on release, just place down
+
 function currentBbox() {
   if (isDragging) {
     const x = Math.max(0, Math.min(canvas.width - crabW, Math.round(dragCursorX - dragGrabOffsetX)));
     const y = Math.max(0, Math.min(canvas.height - crabH, Math.round(dragCursorY - dragGrabOffsetY)));
     return { x, y, w: crabW, h: crabH };
+  }
+  if (isFlying) {
+    return { x: Math.round(flyX), y: Math.round(flyY), w: crabW, h: crabH };
   }
   return {
     x: Math.floor(posX),
@@ -547,6 +603,36 @@ function currentBbox() {
     w: crabW,
     h: crabH,
   };
+}
+
+function stepFlyPhysics() {
+  if (!isFlying) return;
+  flyVY += GRAVITY;
+  flyVX *= AIR_FRICTION;
+  flyX += flyVX;
+  flyY += flyVY;
+  // Wall collisions — lose some horizontal energy and reverse.
+  if (flyX < 0) { flyX = 0; flyVX = -flyVX * WALL_DAMP; }
+  const maxX = canvas.width - crabW;
+  if (flyX > maxX) { flyX = maxX; flyVX = -flyVX * WALL_DAMP; }
+  // Floor collision.
+  const floorY = canvas.height - crabH - 1;
+  if (flyY >= floorY) {
+    flyY = floorY;
+    const totalSpeed = Math.abs(flyVY) + Math.abs(flyVX);
+    if (totalSpeed < FLY_SETTLE_VEL) {
+      // Energy spent — settle.
+      posX = Math.max(0, Math.min(maxX, Math.round(flyX)));
+      isFlying = false;
+      flyVX = 0; flyVY = 0;
+      if (!(window.Chat && window.Chat.isOpen())) externallyPaused = false;
+      triggerReact();
+    } else {
+      // Bounce — flip & damp vertical velocity, damp horizontal a bit too.
+      flyVY = -Math.abs(flyVY) * BOUNCE_DAMP;
+      flyVX *= 0.85;
+    }
+  }
 }
 
 function draw() {
@@ -586,13 +672,36 @@ function draw() {
     danceY = Math.sin(tNow / 1000 * 2 * Math.PI * 2) * 2.5; // 2 Hz bounce
   }
 
-  const drawX = bbox.x + Math.round(swayX);
-  const drawY = bbox.y + bob + Math.round(reactY + stretchY + hoverY + danceY);
-  const frame = moving ? walkFrame : 0;
-  // Force eyes closed while sleeping (overrides blink scheduler).
-  const eyesShown = !(eyesClosed || isSleeping);
+  // NAP: body sinks 1-2 px (resting on the floor) with a slow breathing bob.
+  let napY = 0;
+  if (behaviorState === ST.NAP) {
+    const tSec = (tNow - stateStartedAt) / 1000;
+    napY = 1 + Math.sin(tSec * 1.6) * 0.5;
+  }
 
-  for (let r = 0; r < rows; r++) {
+  // BURROW: body sinks INTO the floor (drawY pushed down so bottom rows clip
+  // off the canvas) then pops back. Symmetric sine arc over state duration.
+  let burrowY = 0;
+  let burrowRowsToHide = 0;
+  if (behaviorState === ST.BURROW && stateUntil > stateStartedAt) {
+    const t = (tNow - stateStartedAt) / (stateUntil - stateStartedAt);
+    if (t > 0 && t < 1) {
+      const dig = Math.sin(t * Math.PI); // 0 → 1 → 0
+      burrowY = dig * (crabH * 0.55);
+      // As Clawd "digs in" his bottom rows are buried — hide them so the
+      // tunnel doesn't render below the floor line.
+      burrowRowsToHide = Math.floor(dig * (rows - 2));
+    }
+  }
+
+  const drawX = bbox.x + Math.round(swayX);
+  const drawY = bbox.y + bob + Math.round(reactY + stretchY + hoverY + danceY + napY + burrowY);
+  const frame = moving ? walkFrame : 0;
+  // Force eyes closed while sleeping OR napping (overrides blink scheduler).
+  const eyesShown = !(eyesClosed || isSleeping || behaviorState === ST.NAP);
+  const maxRow = rows - burrowRowsToHide;
+
+  for (let r = 0; r < maxRow; r++) {
     for (let c = 0; c < cols; c++) {
       const ch = CRAB[r][c];
       if (ch === '.') continue;
@@ -698,6 +807,10 @@ function tick() {
   const now = performance.now();
   const dtMs = Math.min(50, now - lastTickAt); // clamp dt so tab-switch returns don't teleport particles
   lastTickAt = now;
+
+  // Throw physics run before behavior — while flying, Clawd doesn't walk or
+  // pick new behaviors; he just arcs through the air.
+  stepFlyPhysics();
 
   // Sleep state machine: AWAKE → DROWSY (last 3s before sleep) → ASLEEP.
   if (!externallyPaused) {
@@ -814,10 +927,26 @@ document.addEventListener('mousemove', (e) => {
     if (!isDragging && (dx * dx + dy * dy) > DRAG_THRESHOLD * DRAG_THRESHOLD) {
       isDragging = true;
       externallyPaused = true; // pause walking while held
+      lastDragSampleAt = performance.now();
+      lastDragSampleX = e.clientX;
+      lastDragSampleY = e.clientY;
+      dragVX = 0; dragVY = 0;
     }
     if (isDragging) {
       dragCursorX = e.clientX;
       dragCursorY = e.clientY;
+      // Smooth recent motion into a per-frame velocity. Mix old + new so the
+      // release captures the user's intent over the last few ms, not just the
+      // final twitchy mousemove.
+      const now = performance.now();
+      const dtMs = Math.max(8, now - lastDragSampleAt);
+      const instVX = ((e.clientX - lastDragSampleX) / dtMs) * 16.67;
+      const instVY = ((e.clientY - lastDragSampleY) / dtMs) * 16.67;
+      dragVX = dragVX * 0.4 + instVX * 0.6;
+      dragVY = dragVY * 0.4 + instVY * 0.6;
+      lastDragSampleAt = now;
+      lastDragSampleX = e.clientX;
+      lastDragSampleY = e.clientY;
     }
   }
   refreshMouseRegion();
@@ -832,6 +961,11 @@ document.addEventListener('mousedown', (e) => {
     // Start tracking — could turn into a drag (>5px move) or a click (no move).
     // Crab is grabbable whether the chat panel is open or not; the panel will
     // follow him via its own spring-tracked position.
+    // Catching a flying crab mid-arc cancels the throw.
+    if (isFlying) {
+      isFlying = false;
+      flyVX = 0; flyVY = 0;
+    }
     const b = currentBbox();
     dragPressed = true;
     dragStartX = e.clientX;
@@ -854,15 +988,18 @@ document.addEventListener('mouseup', (e) => {
   const wasDragging = isDragging;
   const chatWasOpen = window.Chat && window.Chat.isOpen();
   if (wasDragging) {
-    // Drop: keep horizontal position from where dropped, snap back to floor.
-    const newX = e.clientX - dragGrabOffsetX;
-    posX = Math.max(0, Math.min(canvas.width - crabW, newX));
     isDragging = false;
     dragPressed = false;
-    // Only resume walking if chat wasn't holding the pause — chat owns the
-    // pause when it's open.
-    if (!chatWasOpen) externallyPaused = false;
-    triggerReact(); // tiny landing hop
+    const b = currentBbox();
+    // Always hand off to physics — gravity makes drops fall naturally, and the
+    // settle check inside stepFlyPhysics ends a velocity-less floor release in
+    // a single frame, so this also covers the old "place down" path.
+    isFlying = true;
+    flyX = b.x;
+    flyY = b.y;
+    flyVX = dragVX;
+    flyVY = dragVY;
+    // externallyPaused stays true until physics settles (or chat owns it).
     refreshMouseRegion();
     return;
   }
