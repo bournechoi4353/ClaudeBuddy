@@ -55,14 +55,26 @@
       "title": "Clawd",
       "icon": "build/icon.png",
       "contents": [
-        { "x": 140, "y": 220, "type": "file" },
-        { "x": 400, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 140,
+          "y": 220,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ],
-      "window": { "width": 540, "height": 380 }
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     }
   },
   "devDependencies": {
-    "electron": "^33.0.0",
+    "electron": "^33.4.11",
     "electron-builder": "^26.8.1"
   },
   "dependencies": {
