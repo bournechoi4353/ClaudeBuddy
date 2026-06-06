@@ -1,6 +1,6 @@
 # Clawd
 
-A pixel-art crab pet that lives on your macOS desktop and is also Claude. Click him to chat. He can look at your screen, control Spotify, react when you switch apps, take naps when ignored, and walk around the bottom of whichever monitor you pick.
+A pixel-art crab pet that lives on your macOS **or Windows** desktop and is also Claude. Click him to chat. He can look at your screen, control Spotify, react when you switch apps, take naps when ignored, and walk around the bottom of whichever monitor you pick.
 
 Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no API key, no per-token billing**.
 
@@ -23,6 +23,20 @@ That's it. The installer:
 
 Takes 2–3 minutes the first time, ~30 seconds for subsequent reinstalls.
 
+### Install on Windows
+
+The curl one-liner above is macOS-only. On Windows, build from source:
+
+```powershell
+git clone https://github.com/bournechoi4353/ClaudeBuddy.git
+cd ClaudeBuddy
+npm install
+npm start            # run it directly, or:
+npm run dist:win     # build an installer into dist\
+```
+
+`npm install` automatically pulls the Windows build of the Claude Agent SDK binary. You'll also need Claude Code installed and signed in (see "Set up Claude" below) — on Windows run `claude login` in PowerShell or Command Prompt.
+
 ### First launch
 
 macOS will block the first launch because Clawd isn't signed by an Apple Developer account. **One-time workaround:**
@@ -38,7 +52,8 @@ After that, Clawd is trusted — Spotlight, Launchpad, double-click all work nor
 ## Requirements
 
 - **macOS on Apple Silicon** (M1 / M2 / M3 / M4) — well tested. Intel Macs should work too (the installer auto-detects arch and builds the right binary) but they're not tested yet.
-- **Node.js 20+** — used to build Clawd. Install with `brew install node` or from <https://nodejs.org>.
+- **Windows 10 / 11** (x64 or ARM64) — supported, build from source (see "Install on Windows"). Some macOS-app integrations degrade gracefully there; see "Known limitations".
+- **Node.js 20+** — used to build Clawd. Install with `brew install node` (macOS) or from <https://nodejs.org> (any OS).
 - **Claude Pro or Max subscription.**
 - **Claude Code installed, signed in** — install from <https://claude.com/code>, then run `claude login` in a terminal. Clawd won't be able to chat without this.
 - **Optional:** Spotify desktop app, if you want Clawd to control music.
@@ -150,10 +165,11 @@ osascript -e 'tell application "System Events" to delete login item "Clawd"' 2>/
 
 ## Known limitations
 
-- **macOS only.** AppleScript + Apple's `desktopCapturer` + macOS-specific tray behavior.
-- **Not Apple-Developer-ID signed.** First-launch Gatekeeper warning still requires right-click → Open. Removing that requires a paid Apple Developer account ($99/yr).
+- **Some tools are macOS-only.** Chatting, web search, weather, timers, clipboard, screen/window capture, foreground-app reactions, battery alerts, Gmail/Drive/Docs (via Google), and Spotify all work on both macOS and Windows. These rely on AppleScript and have **no Windows equivalent yet**, so on Windows they reply with a short "mac-only" message instead: Apple Calendar, Apple Notes, Apple Mail, and direct browser-tab reading. (On Windows, use Gmail via "Connect Google", and ask Clawd to "search the web" or "look at your screen" instead of reading a tab.)
+- **Spotify on Windows goes through the Web API.** Playback control needs Spotify Premium and the Spotify desktop app open and active once (so it registers as a device). On macOS there's also an AppleScript fallback that works without Premium.
+- **Not Apple-Developer-ID signed.** First-launch Gatekeeper warning still requires right-click → Open. Removing that requires a paid Apple Developer account ($99/yr). On Windows, SmartScreen may warn on first run of an unsigned build — click "More info → Run anyway".
 - **Single monitor at a time.** Use the tray submenu to switch monitors.
-- **Notification reactions are app-switch reactions.** macOS doesn't expose system notifications to apps without private APIs.
+- **Notification reactions are app-switch reactions.** Neither OS exposes system notifications to apps without private APIs.
 
 ---
 
@@ -165,10 +181,13 @@ Want to hack on Clawd? Clone manually and use the npm scripts:
 git clone https://github.com/bournechoi4353/ClaudeBuddy.git
 cd ClaudeBuddy
 npm install
-npm run setup-signing   # one-time, sets up the self-signed cert
+npm run setup-signing   # macOS only — sets up the self-signed cert
 npm start               # dev mode (Electron with hot file load)
 npm run pack            # build Clawd.app into dist/mac-arm64/
+npm run dist:win        # build a Windows NSIS installer into dist/ (run on Windows)
 ```
+
+Note: `npm install` only fetches the Claude Agent SDK native binary for the OS you run it on. To build a Windows installer you must run on Windows (or otherwise install `@anthropic-ai/claude-agent-sdk-win32-x64`). Same for building the Mac app on macOS.
 
 Project structure:
 
@@ -176,6 +195,7 @@ Project structure:
 - `preload.js` — secure bridge between renderer and main.
 - `agent.js` — wraps the Claude Agent SDK with subscription auth.
 - `tools.js` — tools Clawd can call (time, frontmost window, screen/window capture, Spotify).
+- `platform.js` — cross-platform OS primitives (foreground app + battery: AppleScript on macOS, PowerShell on Windows).
 - `spotify-auth.js` — OAuth Authorization Code + PKCE flow for Spotify connection.
 - `renderer/crab.js` — the pixel-art crab, animation state machine, accessories.
 - `renderer/chat.js` — chat panel UI.

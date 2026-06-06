@@ -5,23 +5,45 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { desktopCapturer, screen, BrowserWindow, systemPreferences, clipboard, app: electronApp } = require('electron');
+const { desktopCapturer, screen, BrowserWindow, systemPreferences, clipboard, shell, app: electronApp } = require('electron');
 const { z } = require('zod');
+const platform = require('./platform');
+
+// Where the tray icon lives differs by OS, so error strings that tell the user
+// to open Clawd's menu point at the right place.
+const TRAY_HINT = platform.IS_MAC
+  ? "click the clawd label in your menubar"
+  : "right-click the clawd crab icon in your system tray (bottom-right, near the clock)";
+
+// Tools backed by macOS apps (Notes, Mail.app, Calendar.app, AppleScript browser
+// reading) have no clean Windows equivalent yet. Rather than throw a confusing
+// AppleScript error on Windows, they return this so Clawd can relay it plainly.
+function macOnly(text) {
+  return { content: [{ type: 'text', text }], isError: true };
+}
 
 // ---- Codex CLI delegation ----
 // Common locations a Codex CLI install might land.
-const CODEX_PATHS = [
-  '/opt/homebrew/bin/codex',
-  '/usr/local/bin/codex',
-  (process.env.HOME || '') + '/.local/bin/codex',
-  (process.env.HOME || '') + '/.codex/bin/codex',
-  // Codex desktop app bundles the CLI inside its Resources directory.
-  '/Applications/Codex.app/Contents/Resources/codex',
-];
+const CODEX_PATHS = platform.IS_WIN
+  ? [
+      // npm global installs drop a codex.cmd shim here.
+      path.join(process.env.APPDATA || '', 'npm', 'codex.cmd'),
+      path.join(process.env.APPDATA || '', 'npm', 'codex.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'codex', 'codex.exe'),
+      path.join(process.env.USERPROFILE || '', '.codex', 'bin', 'codex.exe'),
+    ]
+  : [
+      '/opt/homebrew/bin/codex',
+      '/usr/local/bin/codex',
+      (process.env.HOME || '') + '/.local/bin/codex',
+      (process.env.HOME || '') + '/.codex/bin/codex',
+      // Codex desktop app bundles the CLI inside its Resources directory.
+      '/Applications/Codex.app/Contents/Resources/codex',
+    ];
 function findCodexBinary() {
   for (const p of CODEX_PATHS) {
     try {
-      if (fs.statSync(p).isFile()) return p;
+      if (p && fs.statSync(p).isFile()) return p;
     } catch (_) {}
   }
   return null;
@@ -39,11 +61,19 @@ async function consultCodexHandler({ prompt, context }) {
     };
   }
   const fullPrompt = context ? `${context}\n\n${prompt}` : prompt;
+  // A .cmd shim can't be spawned directly on Windows — run it through cmd.exe,
+  // which also quotes each argument so the free-text prompt survives intact.
+  const isCmd = platform.IS_WIN && /\.cmd$/i.test(codexPath);
+  const spawnCmd = isCmd ? (process.env.ComSpec || 'cmd.exe') : codexPath;
+  const spawnArgs = isCmd
+    ? ['/c', codexPath, 'exec', '--skip-git-repo-check', fullPrompt]
+    : ['exec', '--skip-git-repo-check', fullPrompt];
   try {
     const result = await new Promise((resolve, reject) => {
-      const proc = spawn(codexPath, ['exec', '--skip-git-repo-check', fullPrompt], {
+      const proc = spawn(spawnCmd, spawnArgs, {
         env: { ...process.env, NO_COLOR: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       let out = '';
       let err = '';
@@ -159,6 +189,10 @@ async function isAppRunning(name) {
 // then polls until the app's process exists. Background flag `-g` keeps focus
 // where it was.
 async function ensureAppRunning(appName, maxWaitMs = 6000) {
+  // `open -a` + the AppleScript process check are macOS-only. On other platforms
+  // the callers degrade before reaching here, but guard anyway so we never spawn
+  // a nonexistent `open` binary on Windows.
+  if (!platform.IS_MAC) return false;
   if (await isAppRunning(appName)) return true;
   await new Promise((resolve) => {
     const p = spawn('open', ['-a', appName, '-g']);
@@ -286,6 +320,16 @@ async function spotifyRunning() {
 }
 
 async function spotifyStatusHandler() {
+  if (!platform.IS_MAC) {
+    return spotifyWebControl(async (token) => {
+      const player = await spotifyApiGetPlayer(token);
+      if (!player || !player.item) return 'nothing playing on spotify right now';
+      const t = player.item;
+      const artist = (t.artists || []).map((a) => a.name).join(', ');
+      const state = player.is_playing ? 'playing' : 'paused';
+      return `${state}: "${t.name}"${artist ? ' by ' + artist : ''}`;
+    });
+  }
   if (!(await spotifyRunning())) {
     return { content: [{ type: 'text', text: 'spotify is not open' }] };
   }
@@ -309,6 +353,14 @@ end tell`);
 }
 
 async function spotifyPlayPauseHandler() {
+  if (!platform.IS_MAC) {
+    return spotifyWebControl(async (token) => {
+      const player = await spotifyApiGetPlayer(token);
+      const isPlaying = !!(player && player.is_playing);
+      await spotifyApiTransport('PUT', isPlaying ? 'pause' : 'play', token);
+      return isPlaying ? 'paused' : 'playing';
+    });
+  }
   try {
     await osascriptRun('tell application "Spotify" to playpause');
     return { content: [{ type: 'text', text: 'toggled' }] };
@@ -318,6 +370,12 @@ async function spotifyPlayPauseHandler() {
 }
 
 async function spotifyNextHandler() {
+  if (!platform.IS_MAC) {
+    return spotifyWebControl(async (token) => {
+      await spotifyApiTransport('POST', 'next', token);
+      return 'skipped';
+    });
+  }
   try {
     await osascriptRun('tell application "Spotify" to next track');
     return { content: [{ type: 'text', text: 'skipped' }] };
@@ -327,6 +385,12 @@ async function spotifyNextHandler() {
 }
 
 async function spotifyPreviousHandler() {
+  if (!platform.IS_MAC) {
+    return spotifyWebControl(async (token) => {
+      await spotifyApiTransport('POST', 'previous', token);
+      return 'went back';
+    });
+  }
   try {
     await osascriptRun('tell application "Spotify" to previous track');
     return { content: [{ type: 'text', text: 'went back' }] };
@@ -341,6 +405,26 @@ async function spotifyPlayUriHandler({ uri }) {
       content: [{ type: 'text', text: 'invalid spotify uri — must look like spotify:track:abc123' }],
       isError: true,
     };
+  }
+  if (!platform.IS_MAC) {
+    return spotifyWebControl(async (token) => {
+      const clean = uri.replace(/"/g, '');
+      const body = /^spotify:track:/.test(clean) ? { uris: [clean] } : { context_uri: clean };
+      const res = await fetch('https://api.spotify.com/v1/me/player/play', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) throw new Error('NEEDS_RECONNECT');
+      if (res.status === 404) throw new Error('NO_ACTIVE_DEVICE');
+      if (res.status === 403) {
+        const t = await res.text();
+        if (/premium/i.test(t)) throw new Error('PREMIUM_REQUIRED');
+        throw new Error('NEEDS_RECONNECT_SCOPES');
+      }
+      if (!res.ok && res.status !== 204) throw new Error(`play ${res.status}`);
+      return 'playing ' + clean;
+    });
   }
   try {
     await osascriptRun(`if application "Spotify" is not running then
@@ -415,6 +499,81 @@ async function spotifyApiPlay(token, trackUri, deviceId, contextUri) {
   if (!res.ok && res.status !== 204) {
     const t = await res.text();
     throw new Error(`play ${res.status}: ${t}`);
+  }
+}
+
+// ---- Spotify Web API control ----
+// Used on Windows / any non-macOS platform, where there's no AppleScript bridge
+// to the desktop app. Playback control requires Spotify Premium and an active
+// device; Spotify's HTTP error codes are mapped to crab-friendly text.
+
+async function spotifyWebToken() {
+  const refreshToken = getPrefs().spotifyRefreshToken;
+  if (!refreshToken) return null;
+  return spotifyAuth.getAccessToken(refreshToken, persistRotatedRefreshToken);
+}
+
+function spotifyConnectErr() {
+  return {
+    content: [{
+      type: 'text',
+      text: `spotify isn't connected. tell the user to ${TRAY_HINT} and pick 'Connect Spotify' — one-time login, no setup.`,
+    }],
+    isError: true,
+  };
+}
+
+function spotifyErrText(err) {
+  const m = (err && err.message) || String(err);
+  if (m === 'NEEDS_RECONNECT') return 'spotify needs reconnecting — tell the user to ' + TRAY_HINT + " and pick 'Connect Spotify' again.";
+  if (m === 'NEEDS_RECONNECT_SCOPES') return 'spotify needs reconnecting for playback permissions — tell the user to ' + TRAY_HINT + ' and reconnect spotify.';
+  if (m === 'NO_ACTIVE_DEVICE') return 'no active spotify device — open the spotify app on your pc and play something once, then try again.';
+  if (m === 'PREMIUM_REQUIRED') return 'spotify playback control needs spotify premium.';
+  return 'spotify error: ' + m;
+}
+
+async function spotifyApiGetPlayer(token) {
+  const res = await fetch('https://api.spotify.com/v1/me/player', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 204) return null; // nothing playing
+  if (res.status === 401) throw new Error('NEEDS_RECONNECT');
+  if (res.status === 403) throw new Error('NEEDS_RECONNECT_SCOPES');
+  if (!res.ok) throw new Error(`player ${res.status}`);
+  return res.json();
+}
+
+// PUT/POST a transport command (play, pause, next, previous) with no body.
+async function spotifyApiTransport(method, action, token) {
+  const res = await fetch(`https://api.spotify.com/v1/me/player/${action}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error('NEEDS_RECONNECT');
+  if (res.status === 404) throw new Error('NO_ACTIVE_DEVICE');
+  if (res.status === 403) {
+    const t = await res.text();
+    if (/premium/i.test(t)) throw new Error('PREMIUM_REQUIRED');
+    throw new Error('NEEDS_RECONNECT_SCOPES');
+  }
+  if (!res.ok && res.status !== 204) throw new Error(`${action} ${res.status}`);
+}
+
+// Fetch a token (or return the connect message), run a Web-API action, and map
+// any thrown error to crab-friendly text.
+async function spotifyWebControl(fn) {
+  let token;
+  try {
+    token = await spotifyWebToken();
+  } catch (err) {
+    return { content: [{ type: 'text', text: spotifyErrText(err) }], isError: true };
+  }
+  if (!token) return spotifyConnectErr();
+  try {
+    const text = await fn(token);
+    return { content: [{ type: 'text', text }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: spotifyErrText(err) }], isError: true };
   }
 }
 
@@ -499,16 +658,7 @@ async function spotifyPlayHandler({ query }) {
   const prefs = getPrefs();
   const refreshToken = prefs.spotifyRefreshToken;
   if (!refreshToken) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text:
-            "spotify isn't connected. tell the user to click the clawd label in their menubar and pick 'Connect Spotify' — one-time login, no setup.",
-        },
-      ],
-      isError: true,
-    };
+    return spotifyConnectErr();
   }
   // Step 1: search for the track. Search works for both Free and Premium accounts.
   let track;
@@ -526,7 +676,9 @@ async function spotifyPlayHandler({ query }) {
   // Step 2: try the Web API play first (zero window flash — Premium-only).
   let apiPlayed = false;
   try {
-    await ensureSpotifyRunningHidden();
+    // ensureSpotifyRunningHidden is AppleScript (macOS). On Windows we rely on
+    // Spotify already running as an active Connect device.
+    if (platform.IS_MAC) await ensureSpotifyRunningHidden();
     let devices = await spotifyGetDevices(token);
     let device = pickLocalSpotifyDevice(devices);
     if (!device) {
@@ -545,9 +697,20 @@ async function spotifyPlayHandler({ query }) {
     // instead — works for everyone but the Spotify window may briefly flicker.
   }
 
-  // Step 3: AppleScript fallback. Hides Spotify and restores focus to the user's
-  // previous app, so even if Spotify surfaces, the user isn't yanked out of their work.
+  // Step 3: AppleScript fallback (macOS only). Hides Spotify and restores focus
+  // to the user's previous app, so even if Spotify surfaces, the user isn't
+  // yanked out of their work. Windows has no AppleScript bridge — the Web API
+  // path above is all we have, so explain how to make it work if it failed.
   if (!apiPlayed) {
+    if (!platform.IS_MAC) {
+      return {
+        content: [{
+          type: 'text',
+          text: 'could not start playback — open the spotify app on your pc and play any song once (so it becomes the active device), then ask again. (web playback control also needs spotify premium.)',
+        }],
+        isError: true,
+      };
+    }
     try {
       await playViaAppleScript(track.uri);
     } catch (err) {
@@ -565,6 +728,15 @@ async function spotifySearchHandler({ query }) {
   const q = (query || '').replace(/"/g, '');
   if (!q) {
     return { content: [{ type: 'text', text: 'no search query given' }], isError: true };
+  }
+  if (!platform.IS_MAC) {
+    // No AppleScript to drive the desktop app — open the web player search.
+    try {
+      await shell.openExternal(`https://open.spotify.com/search/${encodeURIComponent(q)}`);
+      return { content: [{ type: 'text', text: `opened a spotify search for "${q}" in your browser` }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: 'spotify error: ' + (err.message || err) }], isError: true };
+    }
   }
   try {
     await osascriptRun(`tell application "Spotify" to activate
@@ -585,6 +757,9 @@ open location "spotify:search:${q}"`);
 // ---- Calendar (macOS Calendar.app via AppleScript) ----
 
 async function calendarHandler({ days }) {
+  if (!platform.IS_MAC) {
+    return macOnly("the calendar tools are mac-only right now — i can't read a windows calendar yet.");
+  }
   await ensureAppRunning('Calendar');
   const dayCount = Math.max(1, Math.min(7, days || 1));
   const script = `set output to ""
@@ -613,6 +788,9 @@ return output`;
 }
 
 async function deleteCalendarEventHandler({ title, start }) {
+  if (!platform.IS_MAC) {
+    return macOnly("deleting calendar events is mac-only right now.");
+  }
   if (!title) {
     return { content: [{ type: 'text', text: 'need a title (substring is fine)' }], isError: true };
   }
@@ -691,6 +869,9 @@ end tell`;
 }
 
 async function addCalendarEventHandler({ title, start, end, calendar, notes }) {
+  if (!platform.IS_MAC) {
+    return macOnly("adding calendar events is mac-only right now.");
+  }
   if (!title || !start) {
     return { content: [{ type: 'text', text: 'need at least title and start time' }], isError: true };
   }
@@ -768,6 +949,9 @@ async function weatherHandler() {
 // ---- Notes (macOS Notes.app via AppleScript) ----
 
 async function getNotesHandler({ limit }) {
+  if (!platform.IS_MAC) {
+    return macOnly("reading notes only works on macOS (apple notes) right now.");
+  }
   await ensureAppRunning('Notes');
   const n = Math.max(1, Math.min(20, limit || 5));
   const script = `set output to ""
@@ -791,6 +975,9 @@ return output`;
 }
 
 async function saveNoteHandler({ title, body }) {
+  if (!platform.IS_MAC) {
+    return macOnly("saving notes only works on macOS (apple notes) right now.");
+  }
   if (!title || !body) {
     return { content: [{ type: 'text', text: 'need both title and body' }], isError: true };
   }
@@ -978,7 +1165,7 @@ async function getGoogleToken() {
 
 function googleNotConnectedError() {
   return {
-    content: [{ type: 'text', text: "google isn't connected. tell the user to click the clawd label in their menubar and pick 'Connect Google' — one-time login." }],
+    content: [{ type: 'text', text: "google isn't connected. tell the user to " + TRAY_HINT + " and pick 'Connect Google' — one-time login." }],
     isError: true,
   };
 }
@@ -1128,6 +1315,9 @@ async function docsReadHandler({ documentId }) {
 // added their account to System Settings → Internet Accounts at least once.
 
 async function getRecentEmailsHandler({ count }) {
+  if (!platform.IS_MAC) {
+    return macOnly('the apple mail fallback is mac-only — on windows, ' + TRAY_HINT + ' and pick Connect Google, then i can read your gmail.');
+  }
   await ensureAppRunning('Mail');
   const n = Math.max(1, Math.min(20, count || 5));
   const script = `tell application "Mail"
@@ -1168,6 +1358,9 @@ end tell`;
 }
 
 async function searchEmailsHandler({ query }) {
+  if (!platform.IS_MAC) {
+    return macOnly('the apple mail fallback is mac-only — on windows, ' + TRAY_HINT + ' and pick Connect Google, then i can search your gmail.');
+  }
   if (!query || !query.trim()) {
     return { content: [{ type: 'text', text: 'no search query' }], isError: true };
   }
@@ -1206,6 +1399,9 @@ end tell`;
 }
 
 async function sendEmailHandler({ to, subject, body }) {
+  if (!platform.IS_MAC) {
+    return macOnly('the apple mail fallback is mac-only — on windows, ' + TRAY_HINT + ' and pick Connect Google, then i can send through your gmail.');
+  }
   if (!to || !subject || !body) {
     return { content: [{ type: 'text', text: 'need to, subject, and body' }], isError: true };
   }
@@ -1291,6 +1487,11 @@ end tell`;
 }
 
 async function readBrowserTabHandler({ query, browser }) {
+  if (!platform.IS_MAC) {
+    // Enumerating browser tabs needs AppleScript (Chrome/Safari scripting). No
+    // clean Windows equivalent yet — steer toward the cross-platform options.
+    return macOnly('reading browser tabs directly is mac-only for now — try asking me to "search the web for X", or to "look at your screen".');
+  }
   const which = (browser || '').toLowerCase();
   let appName = 'Google Chrome';
   if (which.includes('safari')) appName = 'Safari';
@@ -1422,28 +1623,17 @@ async function readBrowserTabHandler({ query, browser }) {
 }
 
 async function frontmostHandler() {
-  try {
-    const script = `tell application "System Events"
-set frontApp to name of first application process whose frontmost is true
-try
-tell process frontApp
-set frontWindow to name of front window
-end tell
-on error
-set frontWindow to ""
-end try
-return frontApp & "::" & frontWindow
-end tell`;
-    const out = await osascriptRun(script);
-    const [appName, windowTitle] = out.split('::');
-    const titlePart = windowTitle ? ` (${windowTitle})` : '';
-    return { content: [{ type: 'text', text: `${appName}${titlePart}` }] };
-  } catch (err) {
+  // platform.getFrontmostWindow() abstracts the macOS AppleScript / Windows
+  // PowerShell P/Invoke and returns { app, title }.
+  const { app: appName, title, error } = await platform.getFrontmostWindow();
+  if (error || !appName) {
     return {
-      content: [{ type: 'text', text: 'could not read frontmost window: ' + err.message }],
+      content: [{ type: 'text', text: 'could not read frontmost window' + (error ? ': ' + error : '') }],
       isError: true,
     };
   }
+  const titlePart = title ? ` (${title})` : '';
+  return { content: [{ type: 'text', text: `${appName}${titlePart}` }] };
 }
 
 async function buildServer(sdk) {

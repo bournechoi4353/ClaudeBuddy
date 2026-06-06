@@ -117,6 +117,24 @@ call tools only when relevant. don't volunteer them every turn. after a tool cal
 
 never break character into long-form replies. brevity is the whole point — the user is reading this in a tiny speech bubble.`;
 
+// On non-macOS platforms several tools are AppleScript-bound and degrade to a
+// short "mac-only" message. Tell Claude up front so it steers clear of them and
+// uses the cross-platform tools instead. Built with single-quote concatenation
+// only — NEVER put backticks in a system-prompt string; they close the template
+// literal and crash the app.
+function platformNote() {
+  if (process.platform === 'darwin') return '';
+  const osName = process.platform === 'win32' ? 'windows' : 'this operating system';
+  return '\n\nplatform note: you are running on ' + osName + ', not macOS. ' +
+    'these tools are mac-only here and will just return a short "mac-only" message if called, so avoid them: ' +
+    'calendar_events, add_calendar_event, delete_calendar_event, get_notes, save_note, read_browser_tab, ' +
+    'get_recent_emails, search_emails, send_email. ' +
+    'use these instead: web_search for anything online, see_screen / see_window to look at the screen, ' +
+    'and the gmail/drive/docs tools once the user connects google. ' +
+    'the spotify tools work through the spotify web api here (they need spotify premium and the spotify desktop app ' +
+    'open and active once), so prefer spotify_play and the playback controls as usual.';
+}
+
 function buildSystemPrompt() {
   const prefs = readPrefsForPrompt();
   const name = (prefs.petName || 'clawd').toString().toLowerCase();
@@ -125,7 +143,7 @@ function buildSystemPrompt() {
   const addon = PERSONALITY_ADDONS[personality] || '';
   return SYSTEM_PROMPT_TEMPLATE
     .replace(/__NAME_CAP__/g, nameCap)
-    .replace(/__NAME__/g, name) + addon;
+    .replace(/__NAME__/g, name) + addon + platformNote();
 }
 
 let sdk = null;

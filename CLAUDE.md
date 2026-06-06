@@ -4,16 +4,19 @@ Context for future Claude sessions working on this codebase. End-user docs live 
 
 ## What this is
 
-Clawd is a transparent always-on-top Electron app on macOS. It draws a small pixel-art crab on the user's screen who can chat, look at the screen, and control Spotify. The "AI" is the Claude Agent SDK driven by the user's **Claude Pro/Max subscription** (not an API key).
+Clawd is a transparent always-on-top Electron app on **macOS and Windows**. It draws a small pixel-art crab on the user's screen who can chat, look at the screen, and control Spotify. The "AI" is the Claude Agent SDK driven by the user's **Claude Pro/Max subscription** (not an API key).
 
 Single window, single monitor at a time. Click-through everywhere except the crab itself and the chat panel.
+
+macOS is the primary, best-tested platform. Windows is supported via a small abstraction layer ([platform.js](platform.js)) plus `process.platform` guards in the existing files — Mac behavior is unchanged. See "Cross-platform (macOS + Windows)" below for what works, what degrades, and the conventions to follow when adding tools.
 
 ## File map
 
 - **`main.js`** — Electron main: window, tray, IPC, app-switch watcher, prefs persistence, monitor picker.
 - **`preload.js`** — contextBridge exposing `window.crabAPI` to the renderer. Only IPC surface.
 - **`agent.js`** — wraps `@anthropic-ai/claude-agent-sdk`. Dynamic-imports it (ESM), holds session ID for multi-turn memory, emits chunks/tool events upstream.
-- **`tools.js`** — the SDK tools Clawd can call. All macOS-specific (osascript, desktopCapturer, Spotify AppleScript).
+- **`tools.js`** — the SDK tools Clawd can call. Many are macOS-specific (osascript / Spotify AppleScript); those are platform-guarded and degrade on Windows. Cross-platform tools (web search, weather, timers, clipboard, screen capture, Gmail/Drive/Docs, Spotify Web API) work everywhere.
+- **`platform.js`** — cross-platform OS primitives shared by main.js + tools.js: `getFrontmostApp()`, `getFrontmostWindow()`, `getBattery()`, plus `IS_MAC`/`IS_WIN`. macOS path = `osascript`/`pmset`; Windows path = PowerShell (`-EncodedCommand`, UTF-16LE base64 to dodge quoting).
 - **`renderer/crab.js`** — pure pixel-art crab, animation, behavior state machine, mouse hit-testing.
 - **`renderer/chat.js`** — chat panel DOM logic.
 - **`renderer/index.html`** — minimal canvas + chat panel.
@@ -32,7 +35,7 @@ The SDK errors with "[invalid_api_key]" or similar if the credentials file is mi
 The `@anthropic-ai/claude-agent-sdk` package contains:
 
 - ESM `.mjs` files (sdk.mjs, bridge.mjs, etc.) — must be loaded via dynamic `import()`, not `require()`.
-- A 200 MB **Bun-compiled native binary** in a sibling package: `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude` (or `-x64` on Intel). The SDK spawns this binary as a subprocess.
+- A 200 MB **Bun-compiled native binary** in a sibling package: `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude` (or `-x64` on Intel; `-win32-x64/claude.exe` on Windows). The SDK spawns this binary as a subprocess. These are `optionalDependencies` of the SDK keyed by os/cpu, so `npm install` only pulls the one matching the machine you install on — **to build the Windows installer you must run `npm install` on Windows** (or otherwise fetch `claude-agent-sdk-win32-x64`). `agent.js#resolveClaudeBinary()` already computes the right package + `claude.exe` name from `process.platform`/`process.arch`.
 
 When packaged into the .app:
 
@@ -41,6 +44,22 @@ When packaged into the .app:
    - `**/node_modules/@anthropic-ai/claude-agent-sdk-*/**`
 2. The SDK's internal `require.resolve` still returns the *asar* path even when the file is unpacked. We compute the real `app.asar.unpacked` path in `agent.js#resolveClaudeBinary()` and pass it as `options.pathToClaudeCodeExecutable` on every query. Don't remove this.
 3. `zod` is a direct dependency in `package.json` — npm only flattens it to `node_modules/zod` because nothing else declares it directly. electron-builder wouldn't bundle it otherwise.
+
+## Cross-platform (macOS + Windows)
+
+The port is **additive**: every macOS code path is intact and untouched; Windows behavior is added beside it behind `process.platform` / `platform.IS_WIN` guards. No second fork — the same files build for both OSes.
+
+**What runs everywhere:** chat (SDK), the crab renderer, the transparent click-through window, `now`, `web_search`, `weather`, timers, clipboard, `see_screen`/`see_window` (Electron `desktopCapturer`), Gmail/Drive/Docs (Google HTTP APIs), and `frontmost_window` (via [platform.js](platform.js)). Battery alerts and app-switch reactions/idle chatter also work on both (PowerShell on Windows).
+
+**What degrades on Windows** (no clean equivalent yet → returns a short "mac-only" message via `tools.js#macOnly()`): `calendar_events` / `add_calendar_event` / `delete_calendar_event` (Calendar.app), `get_notes` / `save_note` (Notes.app), `get_recent_emails` / `search_emails` / `send_email` (Mail.app — Windows users use the Gmail tools instead), and `read_browser_tab` (Chrome/Safari AppleScript). The proactive Calendar nudge in `main.js#checkCalendarSoon()` is also macOS-gated.
+
+**Spotify:** on macOS the control tools (`spotify_status`/`play_pause`/`next`/`previous`/`play_uri`/`search`) drive the desktop app via AppleScript, with `spotify_play` preferring the Web API and falling back to AppleScript. On Windows there's no AppleScript bridge, so those handlers route **entirely through the Spotify Web API** (`spotifyWebControl()` + helpers in tools.js) — which needs Premium and the desktop app open once as an active Connect device. `ensureSpotifyRunningHidden()` and `playViaAppleScript()` are macOS-gated.
+
+**Conventions when adding a tool:**
+- If it needs the foreground app/window or battery, call [platform.js](platform.js) — don't add a second `osascript` spawn.
+- If it's inherently macOS-app-bound (AppleScript to some `.app`), guard with `if (!platform.IS_MAC) return macOnly('…')` at the top, and add the tool name to the `platformNote()` avoid-list in [agent.js](agent.js) so Claude steers clear on Windows. **`platformNote()` and any system-prompt string must never contain backticks** — they close the template literal and crash the app (build the note with single-quote concatenation).
+- User-facing "where's the menu" strings use `TRAY_HINT` in tools.js (menubar on macOS, system-tray on Windows), not a hardcoded "menubar".
+- New top-level source files must be added to `build.files` in `package.json` or electron-builder won't bundle them.
 
 ## macOS specifics
 
@@ -105,6 +124,8 @@ If see_screen stops working, reset its TCC entry:
 ```
 tccutil reset ScreenCapture dev.clawd.app
 ```
+
+**Windows** (run on a Windows machine — see SDK quirks about the native binary): `npm start` for dev, `npm run dist:win` for an NSIS installer into `dist\`. There's no code-signing/Gatekeeper step; SmartScreen may warn on first run of an unsigned build. `setup-signing` is macOS-only and not needed.
 
 ## Things tried and rolled back — don't redo without reason
 

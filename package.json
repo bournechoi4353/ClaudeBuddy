@@ -7,6 +7,8 @@
     "start": "electron .",
     "pack": "electron-builder --mac --dir",
     "dist": "electron-builder --mac",
+    "pack:win": "electron-builder --win --dir",
+    "dist:win": "electron-builder --win",
     "setup-signing": "bash scripts/setup-self-signed.sh"
   },
   "build": {
@@ -17,6 +19,7 @@
       "preload.js",
       "agent.js",
       "tools.js",
+      "platform.js",
       "spotify-auth.js",
       "google-auth.js",
       "google-secrets.js",
@@ -35,6 +38,18 @@
       "extendInfo": {
         "LSUIElement": 1
       }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Clawd"
     },
     "dmg": {
       "title": "Clawd",

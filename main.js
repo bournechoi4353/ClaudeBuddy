@@ -39,6 +39,7 @@ const agent = require('./agent');
 const spotifyAuth = require('./spotify-auth');
 const googleAuth = require('./google-auth');
 const tools = require('./tools');
+const platform = require('./platform');
 const { dialog, shell } = require('electron');
 const os = require('os');
 
@@ -74,14 +75,13 @@ function runCmd(cmd, args) {
 }
 
 async function checkBattery() {
-  const out = await runCmd('pmset', ['-g', 'batt']);
-  // Lines look like: " -InternalBattery-0 (id=...)\t75%; discharging; X:XX remaining ..."
-  const m = out.match(/(\d+)%;\s*([a-zA-Z ]+?);/);
-  if (!m) return;
-  const pct = parseInt(m[1], 10);
-  const state = m[2].toLowerCase().trim();
-  // Reset alerts whenever we're not on battery (plug-in cancels low-battery warnings).
-  if (state !== 'discharging') {
+  // platform.getBattery() abstracts pmset (mac) / Win32_Battery (windows) and
+  // returns null on a machine with no readable battery (e.g. a desktop PC).
+  const batt = await platform.getBattery();
+  if (!batt) return;
+  const pct = batt.percent;
+  // Reset alerts whenever we're charging / on AC (plug-in cancels low-battery warnings).
+  if (batt.charging) {
     notifiedBatteryThresholds.clear();
     return;
   }
@@ -111,6 +111,10 @@ async function isCalendarRunning() {
 }
 
 async function checkCalendarSoon() {
+  // Calendar.app + AppleScript is macOS-only; on Windows there's no equivalent
+  // local calendar to poll, so the proactive "event starts in 5 min" nudge is
+  // simply skipped (battery alerts and idle chatter still run).
+  if (!platform.IS_MAC) return;
   // Only poll Calendar.app if the user already has it running — never auto-launch
   // it on the user's behalf, that would be intrusive.
   if (!(await isCalendarRunning())) return;
@@ -235,9 +239,7 @@ function startIdleChatter() {
       }
       let front = '';
       try {
-        front = (await osascriptOnce(
-          'tell application "System Events" to return name of first application process whose frontmost is true'
-        )).trim();
+        front = await platform.getFrontmostApp();
       } catch (_) {}
       sendNotify(pickIdleThought(front), 10000);
       queueNext();
@@ -250,6 +252,7 @@ function startIdleChatter() {
 function maybeShowClaudeOnboarding() {
   const credsPath = path.join(os.homedir(), '.claude', '.credentials.json');
   if (fs.existsSync(credsPath)) return;
+  const termName = platform.IS_WIN ? 'PowerShell (or Command Prompt)' : 'Terminal';
   const result = dialog.showMessageBoxSync({
     type: 'info',
     title: 'Welcome to Clawd',
@@ -258,7 +261,7 @@ function maybeShowClaudeOnboarding() {
       "Clawd talks using your Claude Pro/Max subscription — there's no API key to add.\n\n" +
       "If you don't have Claude Code installed yet:\n" +
       "   1. Install it from https://claude.com/code\n" +
-      "   2. Open Terminal and run:  claude login\n" +
+      `   2. Open ${termName} and run:  claude login\n` +
       "   3. Sign in with your Claude account\n" +
       "   4. Quit and relaunch Clawd\n\n" +
       "Clawd will appear and walk around regardless, but he can't chat until this is done.",
@@ -392,25 +395,16 @@ function openPreferencesWindow() {
   prefsWin.on('closed', () => { prefsWin = null; });
 }
 
-function osascriptOnce(script) {
-  return new Promise((resolve, reject) => {
-    const p = spawn('osascript', ['-e', script]);
-    let out = '';
-    p.stdout.on('data', (d) => (out += d.toString()));
-    p.on('close', (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`osa ${code}`))));
-    p.on('error', reject);
-  });
-}
-
 function startAppSwitchWatcher(win) {
   let lastFront = null;
   let lastReactionAt = 0;
   const REACTION_MIN_GAP_MS = 20_000; // don't spam the user when they alt-tab a lot
+  // PowerShell spawns are heavier than osascript, so poll a little less often on
+  // Windows to keep CPU down.
+  const pollMs = platform.IS_WIN ? 4000 : 2000;
   setInterval(async () => {
     try {
-      const front = await osascriptOnce(
-        'tell application "System Events" to return name of first application process whose frontmost is true'
-      );
+      const front = await platform.getFrontmostApp();
       const now = Date.now();
       if (
         lastFront !== null &&
@@ -426,7 +420,7 @@ function startAppSwitchWatcher(win) {
     } catch (_) {
       // ignore — Clawd just won't react this tick
     }
-  }, 2000);
+  }, pollMs);
 }
 
 let tray = null;
@@ -607,7 +601,9 @@ function createTray() {
   let icon;
   try {
     icon = nativeImage.createFromPath(iconPath);
-    icon.setTemplateImage(true); // adapts to light/dark menubar automatically
+    // Template image = macOS menu-bar tinting. On Windows it would render the
+    // tray icon as a flat monochrome mask, so only apply it on macOS.
+    if (platform.IS_MAC) icon.setTemplateImage(true);
   } catch (_) {
     icon = nativeImage.createEmpty();
   }
