@@ -953,6 +953,11 @@ document.addEventListener('mousemove', (e) => {
 });
 
 document.addEventListener('mousedown', (e) => {
+  // Only the primary (left) button drives drag / click-to-chat / close. The
+  // right button is handled by the contextmenu listener below (opens the menu),
+  // so we bail here to keep a right-click from also starting a drag or opening
+  // chat on mouseup.
+  if (e.button !== 0) return;
   // Inside the chat panel — chat.js owns those events.
   if (window.Chat && window.Chat.isOpen() && window.Chat.containsPoint(e.clientX, e.clientY)) {
     return;
@@ -1013,6 +1018,18 @@ document.addEventListener('mouseup', (e) => {
     window.Chat.open(currentBbox());
   }
   refreshMouseRegion();
+});
+
+// Right-click the crab to open the settings menu at the cursor. This is the
+// primary way to reach settings on Windows (the tray icon hides in the system-
+// tray overflow) and a handy shortcut on macOS. Right-clicks anywhere else fall
+// through untouched.
+document.addEventListener('contextmenu', (e) => {
+  if (isOverCrab(e.clientX, e.clientY)) {
+    e.preventDefault();
+    noteInteraction();
+    window.crabAPI.openMenu();
+  }
 });
 
 document.addEventListener('keydown', (e) => {

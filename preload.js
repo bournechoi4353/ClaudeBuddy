@@ -24,4 +24,5 @@ contextBridge.exposeInMainWorld('crabAPI', {
     ipcRenderer.on('prefs-updated', (_e, updates) => callback(updates));
   },
   resetChat: () => ipcRenderer.send('chat-reset'),
+  openMenu: () => ipcRenderer.send('open-menu'),
 });

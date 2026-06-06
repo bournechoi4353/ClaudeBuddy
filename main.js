@@ -325,6 +325,15 @@ ipcMain.on('set-ignore-mouse', (_event, ignore) => {
   }
 });
 
+// Right-clicking the crab pops up the tray menu at the cursor. On Windows the
+// tray icon lives in the hidden-icons overflow, so this is the main way to open
+// settings without hunting for it; on macOS it's a shortcut. Mac behavior is
+// otherwise unchanged.
+ipcMain.on('open-menu', () => {
+  if (!mainWin || mainWin.isDestroyed()) return;
+  Menu.buildFromTemplate(buildTrayMenuTemplate()).popup({ window: mainWin });
+});
+
 ipcMain.on('chat-send', async (event, text) => {
   // First-launch naming ceremony — the very first chat message is interpreted
   // as the pet's new name, not as a question for the agent. Validates to
@@ -555,11 +564,15 @@ function showAbout() {
   });
 }
 
-function rebuildTrayMenu() {
+// The tray menu template, shared by the tray icon and the right-click-the-crab
+// menu (see the 'open-menu' IPC handler). On Windows the tray icon hides in the
+// system-tray overflow, so right-clicking the crab is the primary way to reach
+// settings; on macOS it's a handy shortcut. Additive on both platforms.
+function buildTrayMenuTemplate() {
   const launchAtLogin = app.getLoginItemSettings().openAtLogin;
   const monitorItems = buildMonitorSubmenu();
   const spotifyConnected = !!prefs.spotifyRefreshToken;
-  const menu = Menu.buildFromTemplate([
+  return [
     { label: 'Preferences…', click: openPreferencesWindow },
     { label: 'About Clawd', click: showAbout },
     { type: 'separator' },
@@ -592,8 +605,11 @@ function rebuildTrayMenu() {
     },
     { type: 'separator' },
     { label: 'Quit Clawd', click: () => app.quit() },
-  ]);
-  tray.setContextMenu(menu);
+  ];
+}
+
+function rebuildTrayMenu() {
+  tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate()));
 }
 
 function createTray() {
