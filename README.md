@@ -35,7 +35,7 @@ That's it. The installer:
 - installs Node.js for you (via winget) if it's missing
 - downloads the source
 - builds Clawd locally
-- installs it to `%LOCALAPPDATA%\Programs\Clawd` with Start Menu + Desktop shortcuts
+- installs it to `%LOCALAPPDATA%\Clawd-src` and adds Start Menu + Desktop shortcuts
 - launches it
 
 It builds under `%LOCALAPPDATA%` (keeping `node_modules` out of OneDrive's cloud sync) and self-repairs Electron's binary if its download cache is broken — a common Windows snag that otherwise leaves the app unable to start. Re-run the same line anytime to update.
@@ -181,9 +181,11 @@ osascript -e 'tell application "System Events" to delete login item "Clawd"' 2>/
 Windows (PowerShell):
 
 ```powershell
-Get-Process Clawd -ErrorAction SilentlyContinue | Stop-Process -Force
-Remove-Item "$env:LOCALAPPDATA\Programs\Clawd" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:LOCALAPPDATA\Clawd-src" -Recurse -Force -ErrorAction SilentlyContinue
+$src = "$env:LOCALAPPDATA\Clawd-src"
+# Clawd runs as electron.exe out of $src - stop it by path so other Electron apps are untouched
+Get-Process electron -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -and $_.Path.StartsWith($src) } | Stop-Process -Force
+Remove-Item $src -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:APPDATA\Clawd" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clawd.lnk" -ErrorAction SilentlyContinue
 Remove-Item "$([Environment]::GetFolderPath('Desktop'))\Clawd.lnk" -ErrorAction SilentlyContinue
