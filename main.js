@@ -389,6 +389,9 @@ function openPreferencesWindow() {
     width: 400,
     height: 540,
     title: 'Clawd Preferences',
+    // Windows draws this window's title-bar/taskbar icon from here; on macOS the
+    // app bundle icon is used, so leave it unset there.
+    icon: process.platform === 'win32' ? path.join(__dirname, 'build', 'icon.png') : undefined,
     resizable: false,
     minimizable: false,
     maximizable: false,

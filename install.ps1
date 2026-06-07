@@ -218,6 +218,10 @@ try {
   $electronExe = Join-Path $SrcDir 'node_modules\electron\dist\electron.exe'
   if (-not (Test-Path $electronExe)) { Fail "Electron runtime missing - install did not complete."; return }
   $appArg = '"' + $SrcDir + '"'
+  # Use the crab icon (build/icon.ico ships in the source) instead of the default
+  # Electron atom; fall back to electron.exe only if it's somehow missing.
+  $iconIco = Join-Path $SrcDir 'build\icon.ico'
+  $iconLoc = if (Test-Path $iconIco) { $iconIco } else { $electronExe }
 
   $shell = New-Object -ComObject WScript.Shell
   foreach ($lnk in @(
@@ -227,7 +231,7 @@ try {
     $s.TargetPath       = $electronExe
     $s.Arguments        = $appArg
     $s.WorkingDirectory = $SrcDir
-    $s.IconLocation     = $electronExe
+    $s.IconLocation     = $iconLoc
     $s.Description       = 'Clawd - a pixel crab that is also Claude'
     $s.Save()
   }
@@ -244,7 +248,7 @@ try {
     Set-ItemProperty $unKey 'DisplayName'      'Clawd'
     Set-ItemProperty $unKey 'DisplayVersion'   $ver
     Set-ItemProperty $unKey 'Publisher'        'Clawd'
-    Set-ItemProperty $unKey 'DisplayIcon'      $electronExe
+    Set-ItemProperty $unKey 'DisplayIcon'      $iconLoc
     Set-ItemProperty $unKey 'InstallLocation'  $SrcDir
     Set-ItemProperty $unKey 'UninstallString'  $unCmd
     Set-ItemProperty $unKey 'QuietUninstallString' $unCmd
