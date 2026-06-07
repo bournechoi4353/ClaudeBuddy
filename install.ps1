@@ -138,13 +138,16 @@ try {
     Ok "Node $(& $node --version) installed."
   }
 
-  # npm lives beside node.exe
-  $npm = Find-Exe 'npm'
-  if (-not $npm) {
-    $cand = Join-Path (Split-Path $node) 'npm.cmd'
-    if (Test-Path $cand) { $npm = $cand }
+  # Use npm.cmd specifically (it lives beside node.exe). Resolving plain 'npm'
+  # can yield npm.ps1, which a default 'Restricted' execution policy refuses to
+  # run ("running scripts is disabled on this system"); the .cmd shim is a batch
+  # file and isn't governed by the execution policy.
+  $npm = Join-Path (Split-Path $node) 'npm.cmd'
+  if (-not (Test-Path $npm)) {
+    $g = Get-Command 'npm.cmd' -ErrorAction SilentlyContinue
+    if ($g) { $npm = $g.Source }
   }
-  if (-not $npm) { Fail "npm wasn't found next to Node."; return }
+  if (-not $npm -or -not (Test-Path $npm)) { Fail "npm.cmd wasn't found next to Node."; return }
 
   # Claude Code heads-up (chat won't work without it, but it's not needed to build)
   if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\.credentials.json'))) {
