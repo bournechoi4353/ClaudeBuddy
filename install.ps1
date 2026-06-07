@@ -231,6 +231,26 @@ try {
     $s.Description       = 'Clawd - a pixel crab that is also Claude'
     $s.Save()
   }
+
+  # Register a per-user Add/Remove Programs entry so Clawd appears in
+  # Settings > Apps > Installed apps with a working Uninstall button. HKCU =
+  # no admin needed. The Uninstall button runs the shipped uninstall.ps1.
+  $unKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clawd'
+  $uninstallPs1 = Join-Path $SrcDir 'uninstall.ps1'
+  if (Test-Path $uninstallPs1) {
+    $ver = try { (Get-Content (Join-Path $SrcDir 'package.json') -Raw | ConvertFrom-Json).version } catch { '1.0.0' }
+    $unCmd = 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $uninstallPs1 + '"'
+    New-Item -Path $unKey -Force | Out-Null
+    Set-ItemProperty $unKey 'DisplayName'      'Clawd'
+    Set-ItemProperty $unKey 'DisplayVersion'   $ver
+    Set-ItemProperty $unKey 'Publisher'        'Clawd'
+    Set-ItemProperty $unKey 'DisplayIcon'      $electronExe
+    Set-ItemProperty $unKey 'InstallLocation'  $SrcDir
+    Set-ItemProperty $unKey 'UninstallString'  $unCmd
+    Set-ItemProperty $unKey 'QuietUninstallString' $unCmd
+    Set-ItemProperty $unKey 'NoModify' 1 -Type DWord
+    Set-ItemProperty $unKey 'NoRepair' 1 -Type DWord
+  }
   Ok "Installed to $SrcDir."
 
   # ---- launch ----------------------------------------------------------------

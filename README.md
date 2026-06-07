@@ -178,7 +178,9 @@ tccutil reset ScreenCapture dev.clawd.app 2>/dev/null
 osascript -e 'tell application "System Events" to delete login item "Clawd"' 2>/dev/null
 ```
 
-Windows (PowerShell):
+Windows: open **Settings → Apps → Installed apps**, find **Clawd**, and click **Uninstall**.
+
+Or by hand in PowerShell:
 
 ```powershell
 $src = "$env:LOCALAPPDATA\Clawd-src"
