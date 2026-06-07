@@ -25,17 +25,24 @@ Takes 2–3 minutes the first time, ~30 seconds for subsequent reinstalls.
 
 ### Install on Windows
 
-The curl one-liner above is macOS-only. On Windows, build from source:
+The curl one-liner above is macOS-only. On Windows, open **PowerShell** and paste:
 
 ```powershell
-git clone https://github.com/bournechoi4353/ClaudeBuddy.git
-cd ClaudeBuddy
-npm install
-npm start            # run it directly, or:
-npm run dist:win     # build an installer into dist\
+irm https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.ps1 | iex
 ```
 
-`npm install` automatically pulls the Windows build of the Claude Agent SDK binary. You'll also need Claude Code installed and signed in (see "Set up Claude" below) — on Windows run `claude login` in PowerShell or Command Prompt.
+That's it. The installer:
+- installs Node.js for you (via winget) if it's missing
+- downloads the source
+- builds Clawd locally
+- installs it to `%LOCALAPPDATA%\Programs\Clawd` with Start Menu + Desktop shortcuts
+- launches it
+
+It builds under `%LOCALAPPDATA%` (keeping `node_modules` out of OneDrive's cloud sync) and self-repairs Electron's binary if its download cache is broken — a common Windows snag that otherwise leaves the app unable to start. Re-run the same line anytime to update.
+
+You'll still need Claude Code installed and signed in for chat (see "Set up Claude" below) — on Windows run `claude login` in PowerShell. The build is unsigned, so SmartScreen may warn on first launch: click **More info → Run anyway**.
+
+Prefer to build by hand? See "For developers" at the bottom.
 
 ### First launch
 
@@ -52,7 +59,7 @@ After that, Clawd is trusted — Spotlight, Launchpad, double-click all work nor
 ## Requirements
 
 - **macOS on Apple Silicon** (M1 / M2 / M3 / M4) — well tested. Intel Macs should work too (the installer auto-detects arch and builds the right binary) but they're not tested yet.
-- **Windows 10 / 11** (x64 or ARM64) — supported, build from source (see "Install on Windows"). Some macOS-app integrations degrade gracefully there; see "Known limitations".
+- **Windows 10 / 11** (x64 or ARM64) — supported via the one-line PowerShell installer (see "Install on Windows"). Some macOS-app integrations degrade gracefully there; see "Known limitations".
 - **Node.js 20+** — used to build Clawd. Install with `brew install node` (macOS) or from <https://nodejs.org> (any OS).
 - **Claude Pro or Max subscription.**
 - **Claude Code installed, signed in** — install from <https://claude.com/code>, then run `claude login` in a terminal. Clawd won't be able to chat without this.
@@ -142,15 +149,25 @@ After about 3 minutes of no chat interaction, Clawd dozes off — eyes closed, n
 
 ## Updating Clawd
 
-Run the installer again — it pulls the latest source and rebuilds:
+Run the installer again — it pulls the latest source and rebuilds.
+
+macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.sh | bash
 ```
 
-After updating, right-click → Open the first time because the signature changed.
+Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.ps1 | iex
+```
+
+After updating on macOS, right-click → Open the first time because the signature changed.
 
 ## Uninstalling Clawd
+
+macOS:
 
 ```bash
 pkill -f Clawd.app 2>/dev/null
@@ -159,6 +176,17 @@ rm -rf "$HOME/Library/Application Support/Clawd"
 rm -rf "$HOME/Library/Application Support/Clawd-src"
 tccutil reset ScreenCapture dev.clawd.app 2>/dev/null
 osascript -e 'tell application "System Events" to delete login item "Clawd"' 2>/dev/null
+```
+
+Windows (PowerShell):
+
+```powershell
+Get-Process Clawd -ErrorAction SilentlyContinue | Stop-Process -Force
+Remove-Item "$env:LOCALAPPDATA\Programs\Clawd" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\Clawd-src" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:APPDATA\Clawd" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clawd.lnk" -ErrorAction SilentlyContinue
+Remove-Item "$([Environment]::GetFolderPath('Desktop'))\Clawd.lnk" -ErrorAction SilentlyContinue
 ```
 
 ---
