@@ -193,15 +193,6 @@ Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clawd.lnk" -Erro
 Remove-Item "$([Environment]::GetFolderPath('Desktop'))\Clawd.lnk" -ErrorAction SilentlyContinue
 ```
 
----
-
-## Known limitations
-
-- **Some tools are macOS-only.** Chatting, web search, weather, timers, clipboard, screen/window capture, foreground-app reactions, battery alerts, Gmail/Drive/Docs (via Google), and Spotify all work on both macOS and Windows. These rely on AppleScript and have **no Windows equivalent yet**, so on Windows they reply with a short "mac-only" message instead: Apple Calendar, Apple Notes, Apple Mail, and direct browser-tab reading. (On Windows, use Gmail via "Connect Google", and ask Clawd to "search the web" or "look at your screen" instead of reading a tab.)
-- **Spotify on Windows goes through the Web API.** Playback control needs Spotify Premium and the Spotify desktop app open and active once (so it registers as a device). On macOS there's also an AppleScript fallback that works without Premium.
-- **Not Apple-Developer-ID signed.** First-launch Gatekeeper warning still requires right-click → Open. Removing that requires a paid Apple Developer account ($99/yr). On Windows, SmartScreen may warn on first run of an unsigned build — click "More info → Run anyway".
-- **Single monitor at a time.** Use the tray submenu to switch monitors.
-- **Notification reactions are app-switch reactions.** Neither OS exposes system notifications to apps without private APIs.
 
 ---
 
