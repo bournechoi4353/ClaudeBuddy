@@ -2,7 +2,7 @@
 
 A pixel-art crab pet that lives on your macOS **or Windows** desktop and is also Claude. Click him to chat. He can look at your screen, control Spotify, react when you switch apps, take naps when ignored, and walk around the bottom of whichever monitor you pick.
 
-Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no API key, no per-token billing**.
+Powered by your Claude Pro or Max subscription via the Claude Agent SDK: **no API key, no per-token billing**.
 
 ---
 
