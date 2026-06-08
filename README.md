@@ -1,3 +1,7 @@
+
+https://github.com/user-attachments/assets/b6603a68-3ae0-4098-bf8c-6c0ec1cbfa7f
+
+
 # Clawd
 
 Clawd is a little pixel crab who lives on your desktop, and he's also Claude. Click him and a tiny chat window pops up over his head. He can look at your screen, control Spotify, hop around when you switch apps, doze off when you ignore him, and wander along the bottom of whichever monitor you put him on.
