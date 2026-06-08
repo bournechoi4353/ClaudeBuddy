@@ -2,33 +2,30 @@
 
 Clawd is a little pixel crab who lives on your desktop, and he's also Claude. Click him and a tiny chat window pops up over his head. He can look at your screen, control Spotify, hop around when you switch apps, doze off when you ignore him, and wander along the bottom of whichever monitor you put him on.
 
-He runs on your Claude Pro or Max subscription through the Claude Agent SDK, so there's **no API key and no per token billing**. He works on both macOS and Windows.
+Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no API key, no per-token billing**.
 
-## Download (Mac, easiest)
+---
 
-If you just want to try Clawd on a Mac, grab the prebuilt app:
+## Install
 
-1. Head to the [Releases page](https://github.com/bournechoi4353/ClaudeBuddy/releases).
-2. Download the latest `Clawd-0.1.0-arm64.dmg` (Apple Silicon, so any M1 or newer Mac).
-3. Double click the `.dmg` to open it, then drag Clawd into your Applications folder.
+Open Terminal and paste:
 
-> ### Heads up: you have to give Clawd permission before he'll run
->
-> **macOS will block Clawd the first time you open him**, because the app isn't signed with a paid Apple Developer account. This is normal and you only deal with it once.
->
-> 1. Open your **Applications** folder in Finder.
-> 2. **Right click Clawd and choose Open.** (Do not just double click him, that only shows a scary "cannot be opened" box.)
-> 3. Click **Open** again in the warning that pops up.
->
-> After that one time, Clawd is trusted and opens like any other app.
->
-> **He also needs Screen Recording permission** the first time you ask him to look at your screen. There's a short section on that further down.
+```bash
+curl -fsSL https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.sh | bash
+```
 
-Using an Intel Mac, or want to build it yourself? See the build options below.
+That's it. The installer:
+- checks your machine meets the requirements
+- pulls the source
+- builds Clawd locally
+- signs it with a local certificate
+- installs it to `/Applications`
 
-## Install on Windows
+Takes 2–3 minutes the first time, ~30 seconds for subsequent reinstalls.
 
-Open **PowerShell** and paste this:
+### Install on Windows
+
+The curl one-liner above is macOS-only. On Windows, open **PowerShell** and paste:
 
 ```powershell
 irm https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.ps1 | iex
