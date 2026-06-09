@@ -219,3 +219,5 @@ How the project is laid out:
 - `scripts/setup-self-signed.sh`, creates and trusts the self signed signing cert.
 
 For deeper notes on how everything fits together, see [CLAUDE.md](CLAUDE.md).
+
+Claudecode was used in the creation of this project!
