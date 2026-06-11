@@ -1,7 +1,18 @@
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, session, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+
+// Voice replies (Phase 1): Clawd speaks his answers via local Kokoro TTS. Opt-in,
+// off by default — the model is lazy-loaded on first spoken reply so startup is
+// untouched when voice is off. Web Audio must be allowed to autoplay without a
+// user gesture (replies play with no click preceding them).
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+const voicePipeline = require('./voice/pipeline');
+const voiceTts = require('./voice/tts');
+// Voice in (Phase 2): push-to-talk speech-to-text via local Moonshine in an
+// Electron utilityProcess (no system Node). Opt-in, off by default.
+const voiceStt = require('./voice/stt');
 
 // Tiny prefs file so user choices survive relaunches.
 const PREFS_PATH = path.join(app.getPath('userData'), 'prefs.json');
@@ -352,11 +363,24 @@ ipcMain.on('chat-send', async (event, text) => {
     }
     return;
   }
+  // Voice (Phase 1): if enabled, tap the streaming chunks and speak them sentence
+  // by sentence via Kokoro. Barge-in: cut any audio still playing from a prior turn.
+  const voiceOn = !!prefs.voiceReplies;
+  let speaker = null;
+  if (voiceOn) {
+    if (!event.sender.isDestroyed()) event.sender.send('clawd-tts-stop');
+    const send = (channel, payload) => {
+      if (!event.sender.isDestroyed()) event.sender.send(channel, payload);
+    };
+    speaker = voicePipeline.createSpeaker(send, () => event.sender.isDestroyed());
+  }
   try {
     for await (const piece of agent.chat(text)) {
       if (event.sender.isDestroyed()) break;
       event.sender.send('chat-piece', piece);
+      if (speaker && piece.type === 'chunk' && piece.text) speaker.push(piece.text);
     }
+    if (speaker) await speaker.end();
   } catch (err) {
     if (!event.sender.isDestroyed()) {
       event.sender.send('chat-piece', { type: 'error', error: err.message || String(err) });
@@ -366,6 +390,46 @@ ipcMain.on('chat-send', async (event, text) => {
 });
 
 ipcMain.on('chat-reset', () => agent.reset());
+
+// ---- Voice input (Phase 2) ----
+// Triggered by the MIC BUTTON in the chat panel (no global keyboard shortcut —
+// the click-through window can't reliably own a hotkey and combos collide). The
+// renderer captures the mic, sends the audio to stt:transcribe, and submits the
+// transcript as a chat turn.
+
+// Renderer hands us mono 16kHz Float32 audio → Moonshine (utilityProcess) → text.
+ipcMain.handle('stt:transcribe', async (_e, samples) => {
+  try {
+    return { text: await voiceStt.transcribe(samples) };
+  } catch (err) {
+    return { error: err && err.message ? err.message : String(err) };
+  }
+});
+
+// Warm the STT worker/model ahead of the first transcription (first-ever use
+// downloads ~250MB) so the wait happens while the user is still speaking.
+ipcMain.handle('stt:warm', async () => {
+  try { await voiceStt.ensureStt(); return { ok: true }; }
+  catch (err) { return { ok: false, error: err && err.message ? err.message : String(err) }; }
+});
+
+// Trigger the macOS mic permission prompt (renderer getUserMedia alone won't).
+ipcMain.handle('mic:request', async () => {
+  if (process.platform !== 'darwin') return 'granted';
+  const status = systemPreferences.getMediaAccessStatus('microphone');
+  if (status === 'granted') return 'granted';
+  if (status === 'not-determined') {
+    const ok = await systemPreferences.askForMediaAccess('microphone');
+    return ok ? 'granted' : 'denied';
+  }
+  return status; // 'denied' | 'restricted' — user must fix in System Settings
+});
+
+// ---- Hands-free wake word (Phase 3) ----
+// Always-on mic that wakes on "clawd" / "hey clawd". Opt-in, off by default.
+function sendHandsFree(on) {
+  if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('clawd-hands-free', { on });
+}
 
 // Preferences window IPC.
 ipcMain.handle('prefs:get', () => ({ ...prefs }));
@@ -460,6 +524,50 @@ function buildSizeSubmenu() {
     type: 'radio',
     checked: scale === cur,
     click: () => setScale(scale),
+  }));
+}
+
+// Curated Kokoro voices (id → friendly label). Switching is live — just a prefs
+// write that voice/tts.js picks up on the next spoken sentence.
+const VOICE_CHOICES = [
+  ['af_heart', 'Heart — warm female'],
+  ['af_bella', 'Bella — expressive female'],
+  ['af_nicole', 'Nicole — soft / cozy'],
+  ['bf_emma', 'Emma — british female'],
+  ['am_puck', 'Puck — playful male'],
+  ['am_michael', 'Michael — warm male'],
+  ['am_fenrir', 'Fenrir — deeper male'],
+  ['bm_fable', 'Fable — british storyteller'],
+];
+function currentVoice() {
+  return prefs.voiceName || 'af_heart';
+}
+function setVoicePref(updates) {
+  Object.assign(prefs, updates);
+  savePrefs(prefs);
+  voiceTts.ensureTts().catch(() => {}); // warm if not already loaded
+  rebuildTrayMenu();
+}
+function buildVoiceSubmenu() {
+  return VOICE_CHOICES.map(([id, label]) => ({
+    label,
+    type: 'radio',
+    checked: currentVoice() === id,
+    click: () => setVoicePref({ voiceName: id }),
+  }));
+}
+function buildVoiceSpeedSubmenu() {
+  const cur = typeof prefs.voiceSpeed === 'number' ? prefs.voiceSpeed : 1.0;
+  return [
+    ['Sleepy (0.8x)', 0.8],
+    ['Relaxed (0.9x)', 0.9],
+    ['Normal (1.0x)', 1.0],
+    ['Quick (1.1x)', 1.1],
+  ].map(([label, v]) => ({
+    label,
+    type: 'radio',
+    checked: Math.abs(cur - v) < 0.001,
+    click: () => setVoicePref({ voiceSpeed: v }),
   }));
 }
 
@@ -580,6 +688,42 @@ function buildTrayMenuTemplate() {
     { label: 'About Clawd', click: showAbout },
     { type: 'separator' },
     { label: 'Reset conversation', click: () => agent.reset() },
+    {
+      label: 'Speak replies',
+      type: 'checkbox',
+      checked: !!prefs.voiceReplies,
+      click: (item) => {
+        prefs.voiceReplies = item.checked;
+        savePrefs(prefs);
+        // Warm the model now (first load is ~13s + a one-time ~90MB download) so
+        // the first spoken reply isn't delayed by the cold start.
+        if (item.checked) voiceTts.ensureTts().catch(() => {});
+        rebuildTrayMenu();
+      },
+    },
+    { label: 'Voice', submenu: buildVoiceSubmenu(), enabled: !!prefs.voiceReplies },
+    { label: 'Voice speed', submenu: buildVoiceSpeedSubmenu(), enabled: !!prefs.voiceReplies },
+    {
+      label: "Hands-free (say 'clawd')",
+      type: 'checkbox',
+      checked: !!prefs.handsFree,
+      click: async (item) => {
+        prefs.handsFree = item.checked;
+        savePrefs(prefs);
+        if (item.checked) {
+          try {
+            if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') {
+              await systemPreferences.askForMediaAccess('microphone');
+            }
+          } catch (_) {}
+          voiceStt.ensureStt().catch(() => {});
+          sendHandsFree(true);
+        } else {
+          sendHandsFree(false);
+        }
+        rebuildTrayMenu();
+      },
+    },
     { label: 'Size', submenu: buildSizeSubmenu() },
     {
       label: 'Move to monitor',
@@ -646,12 +790,20 @@ function watchDisplayChanges() {
 
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
+  // Allow the renderer's getUserMedia mic request (the OS still gates it via TCC).
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media'));
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
   maybeShowClaudeOnboarding();
   createMainWindow(screen.getPrimaryDisplay());
   createTray();
   watchDisplayChanges();
   startProactiveMonitor();
   startIdleChatter();
+  // Re-arm hands-free if the user left it on (after the renderer has loaded).
+  if (prefs.handsFree) {
+    voiceStt.ensureStt().catch(() => {});
+    mainWin.webContents.once('did-finish-load', () => sendHandsFree(true));
+  }
 });
 
 app.on('window-all-closed', () => {

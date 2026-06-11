@@ -51,8 +51,14 @@
     #history .msg { margin-bottom: 3px; word-wrap: break-word; }
     #history .crab { color: #8a3e1f; }
     #history .you { color: #000; }
+    #inputrow {
+      display: flex;
+      gap: 6px;
+      align-items: stretch;
+    }
     #input {
-      width: 100%;
+      flex: 1;
+      min-width: 0;
       box-sizing: border-box;
       border: 1px solid #000;
       background: #fff;
@@ -63,15 +69,47 @@
       color: #000;
     }
     #input:focus { background: #fffbe6; }
+    #micBtn {
+      flex: 0 0 auto;
+      width: 30px;
+      box-sizing: border-box;
+      border: 1px solid #000;
+      background: #fff;
+      cursor: pointer;
+      padding: 0;
+      position: relative;
+    }
+    #micBtn::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 9px;
+      height: 9px;
+      margin: -4px 0 0 -4px;
+      border-radius: 50%;
+      background: #555;
+    }
+    #micBtn:hover { background: #f0eada; }
+    #micBtn.recording { background: #ffeaea; }
+    #micBtn.recording::before { background: #d33; animation: micpulse 1s ease-in-out infinite; }
+    #micBtn.busy { opacity: 0.45; cursor: default; }
+    @keyframes micpulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.55); } }
   </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
   <div id="chat">
     <div id="history"></div>
-    <input id="input" type="text" placeholder="say something... (esc to close)" autocomplete="off" />
+    <div id="inputrow">
+      <input id="input" type="text" placeholder="say something... (esc to close)" autocomplete="off" />
+      <button id="micBtn" type="button" title="tap to talk" aria-label="talk to clawd"></button>
+    </div>
   </div>
   <script src="crab.js"></script>
   <script src="chat.js"></script>
+  <script src="ttsPlayback.js"></script>
+  <script src="audio.js"></script>
+  <script src="wake.js"></script>
 </body>
 </html>

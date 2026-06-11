@@ -450,6 +450,8 @@ let isHovered = false;        // cursor over the crab
 let isListening = false;       // waiting for chat reply
 let listeningStartAt = 0;
 let danceUntil = 0;            // music playing → bounce to beat
+let isSpeaking = false;        // TTS audio playing → mouth-along bob
+let speakingLevel = 0;         // 0..1 live amplitude of Clawd's own voice
 
 function setListening(on) {
   isListening = !!on;
@@ -458,6 +460,13 @@ function setListening(on) {
 function startDancing(durationMs) {
   danceUntil = performance.now() + (durationMs || 30000);
 }
+function setSpeaking(on) {
+  isSpeaking = !!on;
+  if (!on) speakingLevel = 0;
+}
+function setSpeakingLevel(level) {
+  speakingLevel = Math.max(0, Math.min(1, level || 0));
+}
 
 // Jump reaction — main process pushes a "clawd-react" IPC when frontmost app
 // changes (and could push other events later).
@@ -465,6 +474,13 @@ const REACT_DURATION = 700;
 let reactStartAt = null;
 function triggerReact() {
   reactStartAt = performance.now();
+}
+// Woke up from a hands-free "clawd" — a hop plus a brief listening sway so it's
+// clear he heard the wake word.
+function wakePerk() {
+  triggerReact();
+  setListening(true);
+  setTimeout(() => setListening(false), 1500);
 }
 if (window.crabAPI && window.crabAPI.onReact) {
   window.crabAPI.onReact(() => triggerReact());
@@ -672,6 +688,14 @@ function draw() {
     danceY = Math.sin(tNow / 1000 * 2 * Math.PI * 2) * 2.5; // 2 Hz bounce
   }
 
+  // SPEAKING: bob amplitude tracks Clawd's live voice level so he visibly mouths
+  // along to what he's saying. A small base bob + amplitude-scaled lift.
+  let speakY = 0;
+  if (isSpeaking) {
+    const tSec = tNow / 1000;
+    speakY = -(0.8 + speakingLevel * 4) * (0.6 + 0.4 * Math.abs(Math.sin(tSec * 12)));
+  }
+
   // NAP: body sinks 1-2 px (resting on the floor) with a slow breathing bob.
   let napY = 0;
   if (behaviorState === ST.NAP) {
@@ -695,7 +719,7 @@ function draw() {
   }
 
   const drawX = bbox.x + Math.round(swayX);
-  const drawY = bbox.y + bob + Math.round(reactY + stretchY + hoverY + danceY + napY + burrowY);
+  const drawY = bbox.y + bob + Math.round(reactY + stretchY + hoverY + danceY + speakY + napY + burrowY);
   const frame = moving ? walkFrame : 0;
   // Force eyes closed while sleeping OR napping (overrides blink scheduler).
   const eyesShown = !(eyesClosed || isSleeping || behaviorState === ST.NAP);
@@ -1049,6 +1073,9 @@ window.Crab = {
   clearAccessory,
   setListening,
   dance: startDancing,
+  setSpeaking,
+  setSpeakingLevel,
+  wakePerk,
   isOnboarding: () => onboardingActive,
   endOnboarding: () => { onboardingActive = false; },
 };

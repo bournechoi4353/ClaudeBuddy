@@ -4,6 +4,7 @@
 const chatEl = document.getElementById('chat');
 const historyEl = document.getElementById('history');
 const inputEl = document.getElementById('input');
+const micBtn = document.getElementById('micBtn');
 
 const PANEL_W = 240;
 const PANEL_MARGIN = 8;
@@ -154,29 +155,85 @@ function addMessage(who, text) {
   historyEl.scrollTop = historyEl.scrollHeight;
 }
 
+// Send a message through the agent. Shared by the text input (Enter) and by
+// push-to-talk (a transcribed utterance is submitted exactly like typed text).
+function submit(text) {
+  const t = (text || '').trim();
+  if (!t || inFlight) return;
+  if (!isOpen) open(window.Crab.getBbox());
+  addMessage('you', t);
+  inputEl.value = '';
+  inFlight = true;
+  window.Crab.noteInteraction && window.Crab.noteInteraction();
+  window.Crab.setListening && window.Crab.setListening(true);
+  window.crabAPI.sendChatMessage(t);
+  // After the user names the crab the panel should behave normally on next open.
+  if (window.Crab && window.Crab.endOnboarding) window.Crab.endOnboarding();
+}
+
+// Show a non-agent system line (e.g. a mic-permission hint) in the panel.
+function systemNote(text) {
+  if (!isOpen) open(window.Crab.getBbox());
+  addMessage('crab', text);
+}
+
 inputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    if (inFlight) return;
-    const text = inputEl.value.trim();
-    if (!text) return;
-    addMessage('you', text);
-    inputEl.value = '';
-    inFlight = true;
-    window.Crab.noteInteraction && window.Crab.noteInteraction();
-    window.Crab.setListening && window.Crab.setListening(true);
-    window.crabAPI.sendChatMessage(text);
-    // After the user names the crab the panel should behave normally on next open.
-    if (window.Crab && window.Crab.endOnboarding) window.Crab.endOnboarding();
+    submit(inputEl.value);
   } else if (e.key === 'Escape') {
     close();
   }
   e.stopPropagation();
 });
 
+// ---- Mic button (voice input) ----
+// Reflect capture state on the button. Called by renderer/audio.js.
+function setMicState(state) {
+  if (!micBtn) return;
+  micBtn.classList.toggle('recording', state === 'recording');
+  micBtn.classList.toggle('busy', state === 'transcribing');
+}
+
+let micWarmed = false;
+if (micBtn) {
+  micBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!window.ClawdMic) return;
+    // Already capturing → stop + transcribe.
+    if (window.ClawdMic.isCapturing()) {
+      window.ClawdMic.stop();
+      return;
+    }
+    // Start: make sure we have mic permission, warm the model once, then capture.
+    micBtn.classList.add('busy');
+    let status = 'granted';
+    try {
+      if (window.crabAPI && window.crabAPI.requestMic) status = await window.crabAPI.requestMic();
+    } catch (_) {}
+    micBtn.classList.remove('busy');
+    if (status !== 'granted') {
+      systemNote('i need microphone access — turn it on in System Settings → Privacy & Security → Microphone, then tap the mic again.');
+      return;
+    }
+    if (!micWarmed) {
+      micWarmed = true;
+      window.crabAPI && window.crabAPI.warmStt && window.crabAPI.warmStt();
+    }
+    window.ClawdMic.start();
+  });
+  // Don't let a mousedown on the button bubble to the document handler that
+  // would otherwise treat it as an outside-click and close the chat.
+  micBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+}
+
 window.Chat = {
   open,
   close,
+  submit,
+  systemNote,
+  setMicState,
+  isBusy: () => inFlight,
   isOpen: () => isOpen,
   containsPoint(x, y) {
     if (!isOpen) return false;
