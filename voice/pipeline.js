@@ -45,20 +45,18 @@ function takeSentences(buffer, force) {
   return { sentences, rest };
 }
 
-// Naturalness vs latency: synthesizing each sentence (or clause) separately makes
-// Kokoro reset its prosody contour at every seam — that's the "robotic in the
-// middle" feel. Clawd's replies are short (1–2 sentences), so we DON'T stream
-// sub-units: we hold the whole reply and synthesize it in ONE generate() call,
-// giving Kokoro a single natural contour. Only if a reply runs long do we start
-// flushing — and then only at whole-SENTENCE boundaries, never mid-sentence.
-const LONG_REPLY_CHARS = 220;
+// Latency vs naturalness: we synthesize per SENTENCE as each one completes in
+// the stream, so sentence 1 starts playing while Claude is still writing
+// sentence 2 — first audio lands at time-to-first-sentence instead of
+// (full reply + full synthesis). Prosody seams only happen at sentence
+// boundaries, where a contour reset sounds natural. We never cut mid-sentence
+// (the old clause-cut was the "robotic in the middle" culprit).
 
 // Creates a speaker for one turn. `send(channel, payload)` ships audio to the
 // renderer; `shouldCancel()` lets a new turn / barge-in stop synthesis.
 function createSpeaker(send, shouldCancel) {
   let buffer = '';
   let seq = 0;
-  let started = false; // have we flushed any sentence yet (long-reply path)?
   let synthChain = Promise.resolve();
 
   const emit = (text) => {
@@ -81,20 +79,13 @@ function createSpeaker(send, shouldCancel) {
   return {
     push(delta) {
       buffer += delta;
-      // Stay silent until the reply proves "long". Short replies (the common
-      // case) never trip this — they're spoken whole in end().
-      if (started || buffer.length >= LONG_REPLY_CHARS) {
-        const { sentences, rest } = takeSentences(buffer, false);
-        if (sentences.length) {
-          started = true;
-          buffer = rest;
-          for (const s of sentences) emit(s);
-        }
+      const { sentences, rest } = takeSentences(buffer, false);
+      if (sentences.length) {
+        buffer = rest;
+        for (const s of sentences) emit(s);
       }
     },
     async end() {
-      // Flush whatever remains. For a short reply this is the ENTIRE thing →
-      // one generate() call → one natural contour, no internal seam.
       const tail = buffer.trim();
       if (tail) emit(tail);
       buffer = '';

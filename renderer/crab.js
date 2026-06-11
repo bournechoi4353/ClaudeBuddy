@@ -1076,6 +1076,7 @@ window.Crab = {
   setSpeaking,
   setSpeakingLevel,
   wakePerk,
+  think: showThought,
   isOnboarding: () => onboardingActive,
   endOnboarding: () => { onboardingActive = false; },
 };

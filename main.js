@@ -389,7 +389,7 @@ ipcMain.on('chat-send', async (event, text) => {
   }
 });
 
-ipcMain.on('chat-reset', () => agent.reset());
+ipcMain.on('chat-reset', () => { agent.reset(); agent.warm().catch(() => {}); });
 
 // ---- Voice input (Phase 2) ----
 // Triggered by the MIC BUTTON in the chat panel (no global keyboard shortcut —
@@ -440,6 +440,12 @@ ipcMain.on('prefs:set', (_e, updates) => {
   // (speed, color, sleep threshold) apply immediately.
   if (mainWin && !mainWin.isDestroyed()) {
     mainWin.webContents.send('prefs-updated', updates || {});
+  }
+  // The system prompt is baked at session start (persistent session) — a name
+  // or personality change needs a fresh session to take effect.
+  if (updates && ('petName' in updates || 'personality' in updates)) {
+    agent.reset();
+    agent.warm().catch(() => {});
   }
 });
 
@@ -527,47 +533,26 @@ function buildSizeSubmenu() {
   }));
 }
 
-// Curated Kokoro voices (id → friendly label). Switching is live — just a prefs
-// write that voice/tts.js picks up on the next spoken sentence.
+// The two shipped voices (speeds are baked into voice/tts.js). Switching is
+// live — a prefs write tts.js picks up on the next spoken sentence.
 const VOICE_CHOICES = [
-  ['af_heart', 'Heart — warm female'],
   ['af_bella', 'Bella — expressive female'],
-  ['af_nicole', 'Nicole — soft / cozy'],
-  ['bf_emma', 'Emma — british female'],
   ['am_puck', 'Puck — playful male'],
-  ['am_michael', 'Michael — warm male'],
-  ['am_fenrir', 'Fenrir — deeper male'],
-  ['bm_fable', 'Fable — british storyteller'],
 ];
 function currentVoice() {
-  return prefs.voiceName || 'af_heart';
-}
-function setVoicePref(updates) {
-  Object.assign(prefs, updates);
-  savePrefs(prefs);
-  voiceTts.ensureTts().catch(() => {}); // warm if not already loaded
-  rebuildTrayMenu();
+  return VOICE_CHOICES.some(([id]) => id === prefs.voiceName) ? prefs.voiceName : 'af_bella';
 }
 function buildVoiceSubmenu() {
   return VOICE_CHOICES.map(([id, label]) => ({
     label,
     type: 'radio',
     checked: currentVoice() === id,
-    click: () => setVoicePref({ voiceName: id }),
-  }));
-}
-function buildVoiceSpeedSubmenu() {
-  const cur = typeof prefs.voiceSpeed === 'number' ? prefs.voiceSpeed : 1.0;
-  return [
-    ['Sleepy (0.8x)', 0.8],
-    ['Relaxed (0.9x)', 0.9],
-    ['Normal (1.0x)', 1.0],
-    ['Quick (1.1x)', 1.1],
-  ].map(([label, v]) => ({
-    label,
-    type: 'radio',
-    checked: Math.abs(cur - v) < 0.001,
-    click: () => setVoicePref({ voiceSpeed: v }),
+    click: () => {
+      prefs.voiceName = id;
+      savePrefs(prefs);
+      voiceTts.ensureTts().catch(() => {}); // warm if not already loaded
+      rebuildTrayMenu();
+    },
   }));
 }
 
@@ -687,7 +672,7 @@ function buildTrayMenuTemplate() {
     { label: 'Preferences…', click: openPreferencesWindow },
     { label: 'About Clawd', click: showAbout },
     { type: 'separator' },
-    { label: 'Reset conversation', click: () => agent.reset() },
+    { label: 'Reset conversation', click: () => { agent.reset(); agent.warm().catch(() => {}); } },
     {
       label: 'Speak replies',
       type: 'checkbox',
@@ -702,7 +687,6 @@ function buildTrayMenuTemplate() {
       },
     },
     { label: 'Voice', submenu: buildVoiceSubmenu(), enabled: !!prefs.voiceReplies },
-    { label: 'Voice speed', submenu: buildVoiceSpeedSubmenu(), enabled: !!prefs.voiceReplies },
     {
       label: "Hands-free (say 'clawd')",
       type: 'checkbox',
@@ -799,6 +783,8 @@ app.whenReady().then(() => {
   watchDisplayChanges();
   startProactiveMonitor();
   startIdleChatter();
+  // Pre-spawn the Claude session so the first message isn't cold (~1-3s saved).
+  agent.warm().catch(() => {});
   // Re-arm hands-free if the user left it on (after the renderer has loaded).
   if (prefs.handsFree) {
     voiceStt.ensureStt().catch(() => {});

@@ -76,11 +76,17 @@
   const SAMPLE_RATE = 16000;
   const BUFFER = 2048; // ~128ms frames
   const FRAME_MS = (BUFFER / SAMPLE_RATE) * 1000;
-  const HANG_FRAMES = Math.round(500 / FRAME_MS); // ~0.5s silence ends an utterance
+  // ~0.7s of silence ends an utterance — 0.5s chopped commands at natural
+  // mid-sentence pauses ("clawd, ... what's the weather"), a top finickiness cause.
+  const HANG_FRAMES = Math.round(700 / FRAME_MS);
   const MIN_SPEECH_FRAMES = Math.round(250 / FRAME_MS);
   const MAX_FRAMES = Math.round(10000 / FRAME_MS);
-  const PREROLL_FRAMES = 4;
-  const ABS_MIN = 0.008, ONSET_MULT = 2.2, RELEASE_MULT = 1.4, NOISE_CAP = 0.04;
+  // ~768ms of pre-roll so the onset of "clawd" isn't clipped — a clipped name
+  // transcribes as "awd"/"lawd" and fails the wake match.
+  const PREROLL_FRAMES = 6;
+  // Onset lowered (2.2 → 1.8, abs 0.008 → 0.006) so quieter / farther speech
+  // still triggers capture; the noise filter downstream catches false starts.
+  const ABS_MIN = 0.006, ONSET_MULT = 1.8, RELEASE_MULT = 1.4, NOISE_CAP = 0.04;
 
   let stream = null, ctx = null, source = null, processor = null;
   let running = false;
@@ -115,18 +121,36 @@
     } catch (_) {}
   }
 
-  // Should we ignore captured speech right now? (Clawd talking → echo; a turn in
-  // flight; the push-to-talk mic button is using the mic.)
-  function shouldIgnore() {
+  // Hard gate — situations where the mic data itself is unusable: hands-free
+  // disabled mid-flight, or the push-to-talk mic button owns the mic. NOTE:
+  // Clawd speaking / a busy turn are NOT gated here anymore — being silently
+  // deaf in those windows was the main "he didn't hear me" complaint. Those
+  // cases are handled per-utterance below (barge-in / honest feedback).
+  function shouldIgnoreCapture() {
     if (paused) return true;
-    if (window.ClawdVoice && window.ClawdVoice.isSpeaking && window.ClawdVoice.isSpeaking()) return true;
-    if (window.Chat && window.Chat.isBusy && window.Chat.isBusy()) return true;
     if (window.ClawdMic && window.ClawdMic.isCapturing && window.ClawdMic.isCapturing()) return true;
     return false;
   }
 
+  // Near-miss feedback: something clawd-ish (edit distance 2 — too far to wake)
+  // at the start of an utterance gets a visible "hm?" so failed wakes aren't
+  // silent. Rate-limited so a chatty room doesn't spam bubbles.
+  let lastNearMissAt = 0;
+  function maybeNearMiss(text, now) {
+    if (now - lastNearMissAt < 30_000) return;
+    const tokens = normalize(text).split(' ').filter(Boolean);
+    let i = 0;
+    while (i < tokens.length && FILLERS.has(tokens[i])) i++;
+    const w = tokens[i];
+    if (!w || w.length < 4 || w.length > 8) return;
+    const d = Math.min(levenshtein(w, 'clawd'), levenshtein(w, 'claude'));
+    if (d !== 2) return; // d<=1 already woke; d>2 is just unrelated speech
+    lastNearMissAt = now;
+    if (window.Crab && window.Crab.think) window.Crab.think("hm? say 'clawd' again?", 3000);
+  }
+
   async function handleUtterance(audio) {
-    if (shouldIgnore()) return;
+    if (shouldIgnoreCapture()) return;
     let text = '';
     try {
       const r = await window.crabAPI.transcribe(audio);
@@ -135,14 +159,27 @@
     if (!text || looksLikeNoise(text)) return;
 
     const now = performance.now();
+    const busy = !!(window.Chat && window.Chat.isBusy && window.Chat.isBusy());
+    const talking = !!(window.ClawdVoice && window.ClawdVoice.isSpeaking && window.ClawdVoice.isSpeaking());
+
     // In a follow-up window: the whole utterance is the command (no wake needed).
-    if (now < followUntil) {
+    if (now < followUntil && !busy) {
       followUntil = 0;
       submitCommand(text);
       return;
     }
     const { woke, command } = detectWake(text);
-    if (!woke) return;
+    if (!woke) {
+      if (!busy && !talking) maybeNearMiss(text, now);
+      return;
+    }
+    // Barge-in: saying his name while he's talking cuts the audio off.
+    if (talking && window.ClawdVoice && window.ClawdVoice.stop) window.ClawdVoice.stop();
+    if (busy) {
+      // A turn is still in flight — be honest instead of silently deaf.
+      if (window.Crab && window.Crab.think) window.Crab.think('one sec — still on the last thing', 2500);
+      return;
+    }
     // Woke up — perk the crab up.
     if (window.Crab && window.Crab.noteInteraction) window.Crab.noteInteraction();
     if (window.Crab && window.Crab.wakePerk) window.Crab.wakePerk();
@@ -192,7 +229,7 @@
       if (!speaking) {
         const k = rms < noiseFloor ? 0.25 : 0.02;
         noiseFloor = Math.min(noiseFloor + (rms - noiseFloor) * k, NOISE_CAP);
-        if (rms > onset && !shouldIgnore()) {
+        if (rms > onset && !shouldIgnoreCapture()) {
           speaking = true; frames = [...preroll]; speech = 1; silence = 0;
         }
       } else {

@@ -148,7 +148,6 @@ function buildSystemPrompt() {
 
 let sdk = null;
 let mcpServer = null;
-let lastSessionId = null;
 
 async function loadSDK() {
   if (sdk) return sdk;
@@ -157,69 +156,203 @@ async function loadSDK() {
   return sdk;
 }
 
-async function* chat(userText) {
-  let loadedSdk;
-  try {
-    loadedSdk = await loadSDK();
-  } catch (err) {
-    yield { type: 'error', error: 'sdk load failed: ' + (err.message || err) };
-    yield { type: 'done' };
-    return;
+// ---- Persistent streaming session (the latency fix, ported from C.V.A) ----
+// Calling query() per turn re-spawns the ~200MB CLI subprocess every message
+// (~1-3s of dead time). Instead we keep ONE streaming-input session alive and
+// push each user turn into it: warm turns skip the respawn entirely and get
+// prompt-cache hits on the system prompt + history.
+
+// A pushable async-iterable the SDK consumes as its prompt stream.
+class InputStream {
+  constructor() {
+    this.queue = [];
+    this.waiters = [];
+    this.closed = false;
   }
-  const query = loadedSdk.query;
+  push(msg) {
+    if (this.closed) return;
+    const w = this.waiters.shift();
+    if (w) w({ value: msg, done: false });
+    else this.queue.push(msg);
+  }
+  close() {
+    this.closed = true;
+    let w;
+    while ((w = this.waiters.shift())) w({ value: undefined, done: true });
+  }
+  [Symbol.asyncIterator]() {
+    return {
+      next: () => {
+        const item = this.queue.shift();
+        if (item) return Promise.resolve({ value: item, done: false });
+        if (this.closed) return Promise.resolve({ value: undefined, done: true });
+        return new Promise((resolve) => this.waiters.push(resolve));
+      },
+    };
+  }
+}
+
+// A pushable async-iterable of one turn's pieces, drained by chat().
+class PieceQueue {
+  constructor() {
+    this.queue = [];
+    this.waiters = [];
+    this.closed = false;
+  }
+  push(piece) {
+    if (this.closed) return;
+    const w = this.waiters.shift();
+    if (w) w({ value: piece, done: false });
+    else this.queue.push(piece);
+  }
+  close() {
+    this.closed = true;
+    let w;
+    while ((w = this.waiters.shift())) w({ value: undefined, done: true });
+  }
+  [Symbol.asyncIterator]() {
+    return {
+      next: () => {
+        const item = this.queue.shift();
+        if (item) return Promise.resolve({ value: item, done: false });
+        if (this.closed) return Promise.resolve({ value: undefined, done: true });
+        return new Promise((resolve) => this.waiters.push(resolve));
+      },
+    };
+  }
+}
+
+// A turn that never completes would wedge the session forever (the CLI can hang
+// on a dead network). Past this, reset and surface an error; next turn respawns.
+const TURN_TIMEOUT_MS = 90_000;
+
+let input = null;
+let alive = false;
+let currentTurn = null; // PieceQueue for the in-flight turn
+let turnChain = Promise.resolve(); // serialize turns — one in flight at a time
+
+async function startSession() {
+  const loadedSdk = await loadSDK();
+  input = new InputStream();
 
   const options = {
+    // Built once per session. Pet name / personality changes reset the session
+    // (main.js calls reset() on those pref changes) so the prompt rebuilds.
     systemPrompt: buildSystemPrompt(),
     settingSources: [],
     mcpServers: { clawd: mcpServer },
     allowedTools: tools.allowedTools,
+    // Latency: don't ship the built-in Claude Code toolset's schemas (Bash/Read/
+    // Edit/...) every turn — Clawd only uses its own MCP tools.
+    tools: [],
+    // Latency: replies are 1-2 spoken-style sentences; extended thinking only
+    // delays the first token (and therefore first audio).
+    thinking: { type: 'disabled' },
     includePartialMessages: true,
     model: 'claude-sonnet-4-6',
     permissionMode: 'bypassPermissions',
   };
   if (CLAUDE_BIN) options.pathToClaudeCodeExecutable = CLAUDE_BIN;
-  if (lastSessionId) options.resume = lastSessionId;
 
+  const q = loadedSdk.query({ prompt: input, options });
+  alive = true;
+  void consume(q);
+}
+
+// Single consumer drains the session's output and routes pieces to the
+// in-flight turn's queue. A `result` message marks end-of-turn.
+async function consume(q) {
   try {
-    const result = query({ prompt: userText, options });
-
-    for await (const msg of result) {
-      if (msg.type === 'system' && msg.subtype === 'init') {
-        lastSessionId = msg.session_id;
-      } else if (msg.type === 'stream_event') {
+    for await (const msg of q) {
+      if (msg.type === 'stream_event') {
         const ev = msg.event;
-        if (
-          ev &&
-          ev.type === 'content_block_delta' &&
-          ev.delta &&
-          ev.delta.type === 'text_delta'
-        ) {
-          yield { type: 'chunk', text: ev.delta.text };
-        } else if (
-          ev &&
-          ev.type === 'content_block_start' &&
-          ev.content_block &&
-          ev.content_block.type === 'tool_use'
-        ) {
-          yield { type: 'tool', name: ev.content_block.name };
+        if (ev && ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+          currentTurn?.push({ type: 'chunk', text: ev.delta.text });
+        } else if (ev && ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'tool_use') {
+          currentTurn?.push({ type: 'tool', name: ev.content_block.name });
         }
       } else if (msg.type === 'result') {
-        if (msg.session_id) lastSessionId = msg.session_id;
         if (msg.is_error) {
-          yield { type: 'error', error: msg.subtype || 'agent error' };
+          currentTurn?.push({ type: 'error', error: msg.subtype || 'agent error' });
         }
-        yield { type: 'done' };
-        return;
+        currentTurn?.push({ type: 'done' });
+        currentTurn?.close();
+        currentTurn = null;
       }
     }
   } catch (err) {
-    yield { type: 'error', error: err.message || String(err) };
-    yield { type: 'done' };
+    currentTurn?.push({ type: 'error', error: err.message || String(err) });
+    currentTurn?.push({ type: 'done' });
+    currentTurn?.close();
+    currentTurn = null;
+  } finally {
+    alive = false;
+    input = null;
+  }
+}
+
+async function* chat(userText) {
+  // Serialize: wait for any in-flight turn to finish before starting ours.
+  let release;
+  const myTurn = new Promise((r) => (release = r));
+  const prev = turnChain;
+  turnChain = turnChain.then(() => myTurn);
+  await prev;
+
+  const pieces = new PieceQueue();
+  let watchdog;
+  try {
+    try {
+      if (!alive) await startSession();
+    } catch (err) {
+      yield { type: 'error', error: 'sdk load failed: ' + (err.message || err) };
+      yield { type: 'done' };
+      return;
+    }
+
+    currentTurn = pieces;
+    watchdog = setTimeout(() => {
+      pieces.push({ type: 'error', error: 'that took too long. try again?' });
+      pieces.push({ type: 'done' });
+      pieces.close();
+      reset(); // next turn respawns fresh
+    }, TURN_TIMEOUT_MS);
+
+    input.push({
+      type: 'user',
+      message: { role: 'user', content: userText },
+      parent_tool_use_id: null,
+    });
+
+    for await (const piece of pieces) {
+      yield piece;
+      if (piece.type === 'done') break;
+    }
+  } finally {
+    clearTimeout(watchdog);
+    if (currentTurn === pieces) currentTurn = null;
+    release();
+  }
+}
+
+/** Pre-spawn the session at app start so the first real turn isn't cold. */
+async function warm() {
+  try {
+    if (!alive) await startSession();
+  } catch (_) {
+    /* surfaces on the first real turn instead */
   }
 }
 
 function reset() {
-  lastSessionId = null;
+  if (input) input.close();
+  input = null;
+  alive = false;
+  if (currentTurn) {
+    currentTurn.push({ type: 'done' });
+    currentTurn.close();
+    currentTurn = null;
+  }
 }
 
-module.exports = { chat, reset };
+module.exports = { chat, reset, warm };

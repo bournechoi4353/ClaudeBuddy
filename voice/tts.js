@@ -9,29 +9,46 @@
 // collide → SIGSEGV (documented in C.V.A).
 
 const MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX';
-const DEFAULT_VOICE = 'af_heart'; // Kokoro's highest-graded voice
 const DTYPE = 'q8'; // ~92MB, loads + runs on this runtime
 
-// Voice + speed are read live from prefs.json so the tray "Voice"/"Speed" menus
-// take effect without a restart. Cached briefly to avoid a file read per sentence.
+// The two shipped voices, each with its tuned base speaking rate. Anything else
+// in prefs (from older builds) falls back to bella.
+const VOICES = {
+  af_bella: 1.15, // expressive female — default
+  am_puck: 1.1, // playful male
+};
+const DEFAULT_VOICE = 'af_bella';
+
+// Voice is read live from prefs.json so the tray menu takes effect without a
+// restart. Cached briefly to avoid a file read per sentence.
 let _vp = null;
 let _vpAt = 0;
 function voicePrefs() {
   if (_vp && Date.now() - _vpAt < 3000) return _vp;
   let voice = DEFAULT_VOICE;
-  let speed = 1.0;
   try {
     const { app } = require('electron');
     const p = require('path').join(app.getPath('userData'), 'prefs.json');
     const prefs = JSON.parse(require('fs').readFileSync(p, 'utf8'));
-    if (typeof prefs.voiceName === 'string' && prefs.voiceName) voice = prefs.voiceName;
-    if (typeof prefs.voiceSpeed === 'number' && prefs.voiceSpeed > 0) speed = prefs.voiceSpeed;
+    if (typeof prefs.voiceName === 'string' && VOICES[prefs.voiceName]) voice = prefs.voiceName;
   } catch (_) {
     /* defaults */
   }
-  _vp = { voice, speed };
+  _vp = { voice, speed: VOICES[voice] };
   _vpAt = Date.now();
   return _vp;
+}
+
+// Prosody contouring: Kokoro renders a question's rising intonation, but at a
+// fast speaking rate the rise gets compressed into a flat statement. Deliver
+// questions (and trail-offs) slower so the contour lands; exclamations a touch
+// quicker. Statements keep the voice's full base rate.
+function speedFor(text, base) {
+  const t = text.trim();
+  if (/\?$/.test(t)) return base * 0.85; // question — let the rise breathe
+  if (/(\.\.\.|…)$/.test(t)) return base * 0.88; // trail-off — dreamy
+  if (/!$/.test(t)) return base * 1.05; // exclamation — punchy
+  return base;
 }
 
 let ttsPromise = null;
@@ -86,7 +103,8 @@ const CACHE_MAX = 24;
 
 /** Synthesize text → { samples: Float32Array, rate: number }. */
 async function synthesize(text) {
-  const { voice, speed } = voicePrefs();
+  const { voice, speed: base } = voicePrefs();
+  const speed = speedFor(text, base);
   const key = `${voice}|${speed}|${text}`;
   const hit = cache.get(key);
   if (hit) {
