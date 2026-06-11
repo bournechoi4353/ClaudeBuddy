@@ -45,6 +45,11 @@ window.crabAPI.onChatPiece((piece) => {
     }
     currentReplyEl.textContent += piece.text;
     historyEl.scrollTop = historyEl.scrollHeight;
+    // Voice turn with the panel closed → stream the reply into the bubble.
+    if (voiceTurn) {
+      voiceReplyText += piece.text;
+      if (window.Crab && window.Crab.thinkUpdate) window.Crab.thinkUpdate(voiceReplyText.trim(), 12000);
+    }
   } else if (piece.type === 'error') {
     // Map common SDK-level errors to in-character messages instead of leaking
     // raw error strings to the user.
@@ -62,10 +67,18 @@ window.crabAPI.onChatPiece((piece) => {
       friendly = "hmm, something went sideways. try again?";
     }
     addMessage('crab', friendly);
+    if (voiceTurn && window.Crab && window.Crab.thinkUpdate) window.Crab.thinkUpdate(friendly, 6000);
     currentReplyEl = null;
   } else if (piece.type === 'done') {
     currentReplyEl = null;
     inFlight = false;
+    if (voiceTurn) {
+      // Let the finished bubble linger a beat, then fade.
+      if (voiceReplyText.trim() && window.Crab && window.Crab.thinkUpdate) {
+        window.Crab.thinkUpdate(voiceReplyText.trim(), 7000);
+      }
+      voiceTurn = false;
+    }
     if (window.Crab && window.Crab.setListening) window.Crab.setListening(false);
     if (window.Crab && window.Crab.clearAccessory) window.Crab.clearAccessory();
   }
@@ -155,12 +168,20 @@ function addMessage(who, text) {
   historyEl.scrollTop = historyEl.scrollHeight;
 }
 
-// Send a message through the agent. Shared by the text input (Enter) and by
-// push-to-talk (a transcribed utterance is submitted exactly like typed text).
-function submit(text) {
+// Send a message through the agent. Shared by the text input (Enter), the mic
+// button, and the hands-free wake word. Voice-initiated turns with the panel
+// CLOSED stay closed — the reply streams into the crab's thought bubble instead
+// (and is spoken aloud). The exchange still lands in the panel history, so
+// clicking the crab later shows the full conversation.
+let voiceTurn = false;
+let voiceReplyText = '';
+function submit(text, opts) {
   const t = (text || '').trim();
   if (!t || inFlight) return;
-  if (!isOpen) open(window.Crab.getBbox());
+  const fromVoice = !!(opts && opts.voice);
+  if (!isOpen && !fromVoice) open(window.Crab.getBbox());
+  voiceTurn = fromVoice && !isOpen;
+  voiceReplyText = '';
   addMessage('you', t);
   inputEl.value = '';
   inFlight = true;

@@ -13,11 +13,18 @@
   // ---------- wake-phrase matching ----------
   const GREETINGS = new Set(['hey', 'hay', 'hi', 'he', 'a', 'ay', 'aye', 'eh', 'ey', 'yo', 'ok', 'okay', 'oi']);
   const FILLERS = new Set([...GREETINGS, 'um', 'uh', 'so', 'well', 'and', 'oh', 'now']);
-  // Whisper/Moonshine renderings of "clawd"/"claude".
-  const VARIANTS = new Set([
-    'clawd', 'clawed', 'clod', 'cloud', 'klawd', 'klaud',
-    'claude', 'claud', 'klaude', 'clode', 'clause',
+  // Moonshine renderings of "clawd"/"claude", in two tiers:
+  // STRONG — unambiguously the name; these can wake him ALONE ("clawd.").
+  // WEAK — common English words the model substitutes for the name; these wake
+  // him only WITH a command attached ("cloud, what's the weather"), so ambient
+  // speech can't constantly arm the "listening…" state.
+  const STRONG_VARIANTS = new Set([
+    'clawd', 'clawed', 'clod', 'klawd', 'klaud',
+    'claude', 'claud', 'klaude', 'clode', 'clawde',
   ]);
+  const WEAK_VARIANTS = new Set(['cloud', 'clause', 'called', 'clad', 'claw', 'quad']);
+  // Common words within edit distance 2 of the name — never treat as it.
+  const STOPWORDS = new Set(['could', 'would', 'should', 'cold', 'call', 'old', 'loud', 'allowed', 'aloud', 'glad', 'clap']);
 
   function levenshtein(a, b) {
     if (a === b) return 0;
@@ -34,12 +41,19 @@
     return prev[b.length];
   }
 
-  function wakeish(word) {
-    if (VARIANTS.has(word)) return true;
-    if (word.length >= 4 && word.length <= 7) {
-      return levenshtein(word, 'clawd') <= 1 || levenshtein(word, 'claude') <= 1;
+  // Classify a word as the name: 'strong' (can wake alone), 'weak' (needs a
+  // command attached), or null. The fuzzy net is wider than before (distance 2
+  // counts as weak) so off-pronunciations still work when a command follows.
+  function nameStrength(word) {
+    if (STRONG_VARIANTS.has(word)) return 'strong';
+    if (STOPWORDS.has(word)) return null;
+    if (WEAK_VARIANTS.has(word)) return 'weak';
+    if (word.length >= 4 && word.length <= 8) {
+      const d = Math.min(levenshtein(word, 'clawd'), levenshtein(word, 'claude'));
+      if (d <= 1) return 'strong';
+      if (d === 2) return 'weak';
     }
-    return false;
+    return null;
   }
 
   function normalize(text) {
@@ -50,15 +64,17 @@
     const tokens = normalize(text).split(' ').filter(Boolean);
     let i = 0;
     while (i < tokens.length && FILLERS.has(tokens[i])) i++;
-    if (i < tokens.length && wakeish(tokens[i])) {
-      return { woke: true, command: tokens.slice(i + 1).join(' ') };
+    if (i < tokens.length) {
+      const s = nameStrength(tokens[i]);
+      if (s) return { woke: true, strength: s, word: tokens[i], command: tokens.slice(i + 1).join(' ') };
     }
     for (let j = 0; j < tokens.length - 1; j++) {
-      if (GREETINGS.has(tokens[j]) && wakeish(tokens[j + 1])) {
-        return { woke: true, command: tokens.slice(j + 2).join(' ') };
+      if (GREETINGS.has(tokens[j])) {
+        const s = nameStrength(tokens[j + 1]);
+        if (s) return { woke: true, strength: s, word: tokens[j + 1], command: tokens.slice(j + 2).join(' ') };
       }
     }
-    return { woke: false, command: '' };
+    return { woke: false, strength: null, word: '', command: '' };
   }
 
   const NOISE_OUT = new Set([
@@ -132,22 +148,8 @@
     return false;
   }
 
-  // Near-miss feedback: something clawd-ish (edit distance 2 — too far to wake)
-  // at the start of an utterance gets a visible "hm?" so failed wakes aren't
-  // silent. Rate-limited so a chatty room doesn't spam bubbles.
-  let lastNearMissAt = 0;
-  function maybeNearMiss(text, now) {
-    if (now - lastNearMissAt < 30_000) return;
-    const tokens = normalize(text).split(' ').filter(Boolean);
-    let i = 0;
-    while (i < tokens.length && FILLERS.has(tokens[i])) i++;
-    const w = tokens[i];
-    if (!w || w.length < 4 || w.length > 8) return;
-    const d = Math.min(levenshtein(w, 'clawd'), levenshtein(w, 'claude'));
-    if (d !== 2) return; // d<=1 already woke; d>2 is just unrelated speech
-    lastNearMissAt = now;
-    if (window.Crab && window.Crab.think) window.Crab.think("hm? say 'clawd' again?", 3000);
-  }
+  let lastBareWakeAt = 0;
+  let lastHeardBubbleAt = 0;
 
   async function handleUtterance(audio) {
     if (shouldIgnoreCapture()) return;
@@ -168,11 +170,9 @@
       submitCommand(text);
       return;
     }
-    const { woke, command } = detectWake(text);
-    if (!woke) {
-      if (!busy && !talking) maybeNearMiss(text, now);
-      return;
-    }
+    const { woke, strength, word, command } = detectWake(text);
+    if (!woke) return;
+
     // Barge-in: saying his name while he's talking cuts the audio off.
     if (talking && window.ClawdVoice && window.ClawdVoice.stop) window.ClawdVoice.stop();
     if (busy) {
@@ -180,21 +180,43 @@
       if (window.Crab && window.Crab.think) window.Crab.think('one sec — still on the last thing', 2500);
       return;
     }
-    // Woke up — perk the crab up.
+
+    if (command && command.length >= 2) {
+      // Name + command — accept at either strength (a weak variant with a real
+      // command is strong evidence the user meant him).
+      if (window.Crab && window.Crab.noteInteraction) window.Crab.noteInteraction();
+      if (window.Crab && window.Crab.wakePerk) window.Crab.wakePerk();
+      submitCommand(command);
+      return;
+    }
+
+    // Bare name. Already listening → just extend the window quietly (no
+    // re-chime, no re-bubble — this was the "constantly says listening" spam).
+    if (now < followUntil) {
+      followUntil = now + 8000;
+      return;
+    }
+    // Only an unambiguous (strong) name arms listening, and not more than once
+    // per 10s — weak variants are common words ambient speech kept tripping.
+    if (strength !== 'strong') {
+      // Diagnostic so failed wakes aren't silent: show what he heard.
+      if (now - lastHeardBubbleAt > 30_000 && window.Crab && window.Crab.think) {
+        lastHeardBubbleAt = now;
+        window.Crab.think(`heard "${word}" — say "clawd"?`, 3500);
+      }
+      return;
+    }
+    if (now - lastBareWakeAt < 10_000) return;
+    lastBareWakeAt = now;
     if (window.Crab && window.Crab.noteInteraction) window.Crab.noteInteraction();
     if (window.Crab && window.Crab.wakePerk) window.Crab.wakePerk();
-    if (command && command.length >= 2) {
-      submitCommand(command);
-    } else {
-      // Bare "clawd" — chime and arm an ~8s window for the command.
-      chime();
-      followUntil = now + 8000;
-      if (window.Chat && window.Chat.systemNote) window.Chat.systemNote('listening…');
-    }
+    chime();
+    followUntil = now + 8000;
+    if (window.Crab && window.Crab.think) window.Crab.think('listening…', 8000);
   }
 
   function submitCommand(text) {
-    if (window.Chat && window.Chat.submit) window.Chat.submit(text);
+    if (window.Chat && window.Chat.submit) window.Chat.submit(text, { voice: true });
   }
 
   async function start() {

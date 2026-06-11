@@ -494,6 +494,20 @@ function showThought(text, durationMs) {
   activeThought = { text, startedAt: performance.now(), duration: durationMs || 4500 };
 }
 
+// Update the live bubble's text WITHOUT resetting its clock — used for streaming
+// voice replies into the bubble chunk by chunk (resetting startedAt each chunk
+// would replay the fade-in and flicker). Extends the deadline so the bubble
+// never starts fading mid-stream.
+function updateThought(text, durationMs) {
+  if (!activeThought) {
+    showThought(text, durationMs);
+    return;
+  }
+  activeThought.text = text;
+  const age = performance.now() - activeThought.startedAt;
+  activeThought.duration = Math.max(activeThought.duration, age + (durationMs || 4500));
+}
+
 // Idle thought timing — random interval between 6 and 16 minutes when Clawd
 // is awake and nobody is chatting with him. Pulls from a small hand-written
 // pool so we don't burn API credits on flavor text.
@@ -790,12 +804,33 @@ function draw() {
       const fontSize = Math.max(10, SCALE + 4);
       ctx.font = `${fontSize}px ui-monospace, Menlo, monospace`;
       const padding = 6;
-      const text = activeThought.text;
-      const metrics = ctx.measureText(text);
-      const w = Math.ceil(metrics.width) + padding * 2;
-      const h = Math.ceil(fontSize) + padding * 2;
+      // Word-wrap into lines (voice replies stream whole sentences into the
+      // bubble — a single line would blow out the canvas width). When the text
+      // overflows the cap, keep the LAST lines so it reads like live captions.
+      const maxTextW = Math.min(300, canvas.width - 28);
+      const MAX_LINES = 5;
+      const words = activeThought.text.split(/\s+/).filter(Boolean);
+      let lines = [];
+      let cur = '';
+      for (const word of words) {
+        const tryLine = cur ? cur + ' ' + word : word;
+        if (cur && ctx.measureText(tryLine).width > maxTextW) {
+          lines.push(cur);
+          cur = word;
+        } else {
+          cur = tryLine;
+        }
+      }
+      if (cur) lines.push(cur);
+      if (lines.length === 0) lines = [''];
+      if (lines.length > MAX_LINES) lines = lines.slice(lines.length - MAX_LINES);
+      const lineH = fontSize + 4;
+      let textW = 0;
+      for (const l of lines) textW = Math.max(textW, ctx.measureText(l).width);
+      const w = Math.ceil(Math.min(maxTextW, textW)) + padding * 2;
+      const h = lines.length * lineH + padding * 2;
       let bubbleX = bbox.x + bbox.w / 2 - w / 2;
-      const bubbleY = bbox.y - h - 8;
+      const bubbleY = Math.max(4, bbox.y - h - 8);
       // Keep within canvas horizontally.
       if (bubbleX < 4) bubbleX = 4;
       if (bubbleX + w > canvas.width - 4) bubbleX = canvas.width - w - 4;
@@ -820,7 +855,9 @@ function draw() {
       ctx.fillStyle = '#000';
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
-      ctx.fillText(text, bubbleX + padding, bubbleY + h / 2);
+      for (let li = 0; li < lines.length; li++) {
+        ctx.fillText(lines[li], bubbleX + padding, bubbleY + padding + li * lineH + lineH / 2);
+      }
       ctx.globalAlpha = 1;
     }
   }
@@ -1077,6 +1114,7 @@ window.Crab = {
   setSpeakingLevel,
   wakePerk,
   think: showThought,
+  thinkUpdate: updateThought,
   isOnboarding: () => onboardingActive,
   endOnboarding: () => { onboardingActive = false; },
 };
