@@ -87,12 +87,25 @@ async function transcribeOnce(samples) {
 async function transcribe(samples) {
   // Too short to hold a word — skip the model call (accidental taps).
   if (!samples || samples.length < 3200) return '';
+  const { vlog } = require('./log');
+  const t0 = Date.now();
   try {
-    return await transcribeOnce(samples);
+    const text = await transcribeOnce(samples);
+    vlog('stt', `${Date.now() - t0}ms for ${(samples.length / 16000).toFixed(1)}s audio -> "${text.slice(0, 60)}"`);
+    return text;
   } catch (err) {
     if (!/worker exited/i.test(err && err.message ? err.message : '')) throw err;
+    vlog('stt', 'worker died mid-request — respawning + retrying');
     return await transcribeOnce(samples);
   }
 }
 
-module.exports = { ensureStt, transcribe, setSttProgress };
+/** Keep-warm tick: run a tiny inference so the model's pages stay resident
+ *  through idle stretches. No-op if the worker was never started — keeping
+ *  warm must never trigger the initial ~250MB download. */
+async function keepWarm() {
+  if (!worker) return;
+  await transcribeOnce(new Float32Array(8000)); // 0.5s of silence — ~30ms run
+}
+
+module.exports = { ensureStt, transcribe, setSttProgress, keepWarm };

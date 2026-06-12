@@ -256,6 +256,7 @@ async function startSession() {
 
   const q = loadedSdk.query({ prompt: input, options });
   alive = true;
+  try { require('./voice/log').vlog('agent', 'session spawned'); } catch (_) {}
   void consume(q);
 }
 
@@ -288,6 +289,7 @@ async function consume(q) {
   } finally {
     alive = false;
     input = null;
+    try { require('./voice/log').vlog('agent', 'session ended'); } catch (_) {}
   }
 }
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, session, systemPreferences } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, session, systemPreferences, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -304,6 +304,10 @@ function createMainWindow(display) {
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      // Never throttle this renderer's timers/audio when Chromium deems the
+      // window occluded — the wake-word VAD and TTS playback run here, and
+      // throttling after idle is one of the "stutters when cold" causes.
+      backgroundThrottling: false,
     },
   });
 
@@ -369,18 +373,28 @@ ipcMain.on('chat-send', async (event, text) => {
   let speaker = null;
   if (voiceOn) {
     if (!event.sender.isDestroyed()) event.sender.send('clawd-tts-stop');
+    // Warm the ElevenLabs TLS connection (no-op on the local voice) while
+    // Claude writes the first sentence — kills the cold-start gap after idle.
+    voiceTts.preconnect();
     const send = (channel, payload) => {
       if (!event.sender.isDestroyed()) event.sender.send(channel, payload);
     };
     speaker = voicePipeline.createSpeaker(send, () => event.sender.isDestroyed());
   }
+  const tTurn0 = Date.now();
+  let tFirstChunk = 0;
   try {
     for await (const piece of agent.chat(text)) {
       if (event.sender.isDestroyed()) break;
+      if (!tFirstChunk && piece.type === 'chunk') tFirstChunk = Date.now();
       event.sender.send('chat-piece', piece);
       if (speaker && piece.type === 'chunk' && piece.text) speaker.push(piece.text);
     }
     if (speaker) await speaker.end();
+    try {
+      const ft = tFirstChunk ? ((tFirstChunk - tTurn0) / 1000).toFixed(2) + 's' : 'n/a';
+      require('./voice/log').vlog('turn', `first-token ${ft} · total ${((Date.now() - tTurn0) / 1000).toFixed(2)}s`);
+    } catch (_) {}
   } catch (err) {
     if (!event.sender.isDestroyed()) {
       event.sender.send('chat-piece', { type: 'error', error: err.message || String(err) });
@@ -431,6 +445,34 @@ function sendHandsFree(on) {
   if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('clawd-hands-free', { on });
 }
 
+// ---- Voice keep-warm ----
+// After a stretch of idle, macOS App Naps the process and pages out the speech
+// models (~300MB Kokoro + ~400MB Moonshine); the first interaction then pays
+// page-in + throttle costs and the reply audio stutters. While any voice
+// feature is on: hold an app-suspension blocker and tickle each loaded model
+// every few minutes so its pages stay resident. Both no-ops when voice is off.
+let keepWarmTimer = null;
+let psbId = null;
+function refreshVoiceKeepWarm() {
+  const active = !!(prefs.voiceReplies || prefs.handsFree);
+  if (active && psbId === null) psbId = powerSaveBlocker.start('prevent-app-suspension');
+  if (!active && psbId !== null) {
+    powerSaveBlocker.stop(psbId);
+    psbId = null;
+  }
+  if (active && !keepWarmTimer) {
+    keepWarmTimer = setInterval(() => {
+      try { require('./voice/log').vlog('warm', 'tick'); } catch (_) {}
+      if (prefs.handsFree) voiceStt.keepWarm().catch(() => {});
+      if (prefs.voiceReplies) voiceTts.keepWarm().catch(() => {});
+    }, 2 * 60_000);
+  }
+  if (!active && keepWarmTimer) {
+    clearInterval(keepWarmTimer);
+    keepWarmTimer = null;
+  }
+}
+
 // Preferences window IPC.
 ipcMain.handle('prefs:get', () => ({ ...prefs }));
 ipcMain.on('prefs:set', (_e, updates) => {
@@ -447,6 +489,8 @@ ipcMain.on('prefs:set', (_e, updates) => {
     agent.reset();
     agent.warm().catch(() => {});
   }
+  // Adding/removing an ElevenLabs key changes the Voice submenu's entries.
+  if (updates && 'elevenLabsKey' in updates) rebuildTrayMenu();
 });
 
 let prefsWin = null;
@@ -533,24 +577,31 @@ function buildSizeSubmenu() {
   }));
 }
 
-// The two shipped voices (speeds are baked into voice/tts.js). Switching is
+// Voice choices (speeds/IDs are baked into voice/tts.js). The ElevenLabs pair
+// only shows when the user has pasted an API key in Preferences. Switching is
 // live — a prefs write tts.js picks up on the next spoken sentence.
-const VOICE_CHOICES = [
-  ['af_bella', 'Bella — expressive female'],
-  ['am_puck', 'Puck — playful male'],
-];
+function voiceChoices() {
+  const choices = [];
+  if (prefs.elevenLabsKey && prefs.elevenLabsKey.trim()) {
+    choices.push(['el_rachel', 'Rachel — ElevenLabs'], ['el_josh', 'Josh — ElevenLabs']);
+  }
+  choices.push(['af_bella', 'Bella — built-in'], ['am_puck', 'Puck — built-in']);
+  return choices;
+}
 function currentVoice() {
-  return VOICE_CHOICES.some(([id]) => id === prefs.voiceName) ? prefs.voiceName : 'af_bella';
+  const choices = voiceChoices();
+  if (choices.some(([id]) => id === prefs.voiceName)) return prefs.voiceName;
+  return choices[0][0]; // EL key present → Rachel; otherwise Bella
 }
 function buildVoiceSubmenu() {
-  return VOICE_CHOICES.map(([id, label]) => ({
+  return voiceChoices().map(([id, label]) => ({
     label,
     type: 'radio',
     checked: currentVoice() === id,
     click: () => {
       prefs.voiceName = id;
       savePrefs(prefs);
-      voiceTts.ensureTts().catch(() => {}); // warm if not already loaded
+      voiceTts.ensureTts().catch(() => {}); // warm kokoro (also the EL fallback)
       rebuildTrayMenu();
     },
   }));
@@ -683,6 +734,7 @@ function buildTrayMenuTemplate() {
         // Warm the model now (first load is ~13s + a one-time ~90MB download) so
         // the first spoken reply isn't delayed by the cold start.
         if (item.checked) voiceTts.ensureTts().catch(() => {});
+        refreshVoiceKeepWarm();
         rebuildTrayMenu();
       },
     },
@@ -705,6 +757,7 @@ function buildTrayMenuTemplate() {
         } else {
           sendHandsFree(false);
         }
+        refreshVoiceKeepWarm();
         rebuildTrayMenu();
       },
     },
@@ -790,6 +843,7 @@ app.whenReady().then(() => {
     voiceStt.ensureStt().catch(() => {});
     mainWin.webContents.once('did-finish-load', () => sendHandsFree(true));
   }
+  refreshVoiceKeepWarm();
 });
 
 app.on('window-all-closed', () => {

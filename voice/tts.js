@@ -11,32 +11,70 @@
 const MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 const DTYPE = 'q8'; // ~92MB, loads + runs on this runtime
 
-// The two shipped voices, each with its tuned base speaking rate. Anything else
-// in prefs (from older builds) falls back to bella.
+// Local Kokoro voices (free, offline), each with its tuned base speaking rate.
 const VOICES = {
   af_bella: 1.15, // expressive female — default
   am_puck: 1.1, // playful male
 };
 const DEFAULT_VOICE = 'af_bella';
 
-// Voice is read live from prefs.json so the tray menu takes effect without a
-// restart. Cached briefly to avoid a file read per sentence.
+// ElevenLabs voices (premium cloud TTS — needs the user's API key, entered in
+// Preferences). Far more expressive than Kokoro; used when a key is present and
+// an el_ voice is selected. Any API failure falls back to Kokoro so Clawd never
+// goes mute. IDs are ElevenLabs' stock premade voices.
+const EL_VOICES = {
+  el_rachel: '21m00Tcm4TlvDq8ikWAM', // Rachel — calm, natural female
+  el_josh: 'TxGEqnHWrfWFTfGW9XjX', // Josh — young male
+};
+const EL_MODEL = 'eleven_flash_v2_5'; // lowest latency, 0.5x credit cost
+
+// Voice + key are read live from prefs.json so Preferences / tray changes take
+// effect without a restart. Cached briefly to avoid a file read per sentence.
 let _vp = null;
 let _vpAt = 0;
 function voicePrefs() {
   if (_vp && Date.now() - _vpAt < 3000) return _vp;
   let voice = DEFAULT_VOICE;
+  let elKey = '';
   try {
     const { app } = require('electron');
     const p = require('path').join(app.getPath('userData'), 'prefs.json');
     const prefs = JSON.parse(require('fs').readFileSync(p, 'utf8'));
-    if (typeof prefs.voiceName === 'string' && VOICES[prefs.voiceName]) voice = prefs.voiceName;
+    if (typeof prefs.elevenLabsKey === 'string') elKey = prefs.elevenLabsKey.trim();
+    const valid = (v) => VOICES[v] || (elKey && EL_VOICES[v]);
+    if (typeof prefs.voiceName === 'string' && valid(prefs.voiceName)) {
+      voice = prefs.voiceName;
+    } else if (elKey) {
+      voice = 'el_rachel'; // key present, nothing valid picked → best voice wins
+    }
   } catch (_) {
     /* defaults */
   }
-  _vp = { voice, speed: VOICES[voice] };
+  _vp = { voice, speed: VOICES[voice] || 1.0, elKey };
   _vpAt = Date.now();
   return _vp;
+}
+
+// ---- ElevenLabs backend ----
+// pcm_24000 returns raw 16-bit PCM — drops straight into the existing playback
+// path with no decode step. Per-sentence requests on the flash model keep
+// first-audio latency in the few-hundred-ms range.
+async function elevenSynthesize(text, voiceKey, apiKey) {
+  const id = EL_VOICES[voiceKey];
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${id}?output_format=pcm_24000`,
+    {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, model_id: EL_MODEL }),
+    }
+  );
+  if (!res.ok) throw new Error(`elevenlabs ${res.status}`);
+  const ab = await res.arrayBuffer();
+  const pcm = new Int16Array(ab, 0, Math.floor(ab.byteLength / 2));
+  const samples = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 0x8000;
+  return { samples, rate: 24000 };
 }
 
 // Prosody contouring: Kokoro renders a question's rising intonation, but at a
@@ -101,23 +139,65 @@ async function ensureTts() {
 const cache = new Map();
 const CACHE_MAX = 24;
 
+// Local Kokoro synthesis (with prosody contouring — ElevenLabs doesn't need it,
+// its prosody is natural out of the box).
+async function kokoroSynthesize(text, voice, baseSpeed) {
+  const speed = speedFor(text, baseSpeed);
+  const tts = await getTts();
+  const audio = await tts.generate(text, { voice, speed });
+  return { samples: audio.audio, rate: audio.sampling_rate };
+}
+
 /** Synthesize text → { samples: Float32Array, rate: number }. */
 async function synthesize(text) {
-  const { voice, speed: base } = voicePrefs();
-  const speed = speedFor(text, base);
-  const key = `${voice}|${speed}|${text}`;
+  const { voice, speed: base, elKey } = voicePrefs();
+  const key = `${voice}|${base}|${text}`;
   const hit = cache.get(key);
   if (hit) {
     cache.delete(key);
     cache.set(key, hit);
     return hit;
   }
-  const tts = await getTts();
-  const audio = await tts.generate(text, { voice, speed });
-  const speech = { samples: audio.audio, rate: audio.sampling_rate };
+  const { vlog } = require('./log');
+  const t0 = Date.now();
+  let speech;
+  if (EL_VOICES[voice] && elKey) {
+    try {
+      speech = await elevenSynthesize(text, voice, elKey);
+      vlog('tts', `elevenlabs ${Date.now() - t0}ms for ${(speech.samples.length / speech.rate).toFixed(1)}s ("${text.slice(0, 40)}")`);
+    } catch (err) {
+      // Quota out / network down / bad key — fall back to local Kokoro so the
+      // crab never goes mute. Don't cache the fallback under the EL key.
+      vlog('tts', `elevenlabs FAILED (${err && err.message ? err.message : err}) — kokoro fallback`);
+      return kokoroSynthesize(text, DEFAULT_VOICE, VOICES[DEFAULT_VOICE]);
+    }
+  } else {
+    speech = await kokoroSynthesize(text, voice, base);
+    vlog('tts', `kokoro ${Date.now() - t0}ms for ${(speech.samples.length / speech.rate).toFixed(1)}s ("${text.slice(0, 40)}")`);
+  }
   cache.set(key, speech);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   return speech;
+}
+
+/** Keep-warm tick: run a tiny Kokoro inference so the model's pages stay
+ *  resident through idle stretches (paged-out weights make the first reply
+ *  synth slower than real-time → audible stutter). No-op until the model has
+ *  been loaded by real use — never triggers the initial download. Bypasses the
+ *  LRU cache on purpose; a cache hit wouldn't touch the weights. */
+async function keepWarm() {
+  if (loadState !== 'ready') return;
+  const tts = await getTts();
+  await tts.generate('hm', { voice: DEFAULT_VOICE, speed: 1.3 });
+}
+
+/** Fire-and-forget TLS warmup for the ElevenLabs path — after idle, the first
+ *  per-sentence request otherwise pays DNS+TLS setup, which lands as a gap
+ *  before/inside the spoken reply. Called when a voiced turn starts. */
+function preconnect() {
+  const { voice, elKey } = voicePrefs();
+  if (!(EL_VOICES[voice] && elKey)) return;
+  fetch('https://api.elevenlabs.io/v1/user', { headers: { 'xi-api-key': elKey } }).catch(() => {});
 }
 
 /** Float32 PCM [-1,1] → Int16 PCM. Halves the IPC copy; inaudible at 16-bit. */
@@ -130,4 +210,4 @@ function floatToInt16(f) {
   return out;
 }
 
-module.exports = { synthesize, floatToInt16, ensureTts, getLoadState };
+module.exports = { synthesize, floatToInt16, ensureTts, getLoadState, keepWarm, preconnect };

@@ -3,6 +3,7 @@
 
   const $ = (id) => document.getElementById(id);
   const petName = $('petName');
+  const elKey = $('elKey');
   const personality = $('personality');
   const skin = $('skin');
   const speed = $('speed');
@@ -13,6 +14,7 @@
   const sleepMinVal = $('sleepMinVal');
 
   petName.value = prefs.petName || 'clawd';
+  elKey.value = prefs.elevenLabsKey || '';
   personality.value = prefs.personality || 'default';
   skin.value = prefs.skin || 'default';
   speed.value = prefs.crabSpeed != null ? prefs.crabSpeed : 0.5;
@@ -49,6 +51,9 @@
   petName.addEventListener('input', () => {
     const v = petName.value.trim().toLowerCase() || 'clawd';
     window.crabAPI.setPref({ petName: v });
+  });
+  elKey.addEventListener('input', () => {
+    window.crabAPI.setPref({ elevenLabsKey: elKey.value.trim() });
   });
   personality.addEventListener('change', () => {
     window.crabAPI.setPref({ personality: personality.value });

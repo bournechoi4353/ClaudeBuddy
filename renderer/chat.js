@@ -182,6 +182,10 @@ function submit(text, opts) {
   if (!isOpen && !fromVoice) open(window.Crab.getBbox());
   voiceTurn = fromVoice && !isOpen;
   voiceReplyText = '';
+  // State cue: the wake flow's "listening…" bubble would otherwise linger
+  // through the whole think-time. Flip it the moment the command is in; the
+  // streaming reply text then overwrites this.
+  if (voiceTurn && window.Crab && window.Crab.think) window.Crab.think('thinking…', 20000);
   addMessage('you', t);
   inputEl.value = '';
   inFlight = true;

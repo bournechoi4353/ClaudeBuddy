@@ -12,7 +12,10 @@
 (function () {
   // ---------- wake-phrase matching ----------
   const GREETINGS = new Set(['hey', 'hay', 'hi', 'he', 'a', 'ay', 'aye', 'eh', 'ey', 'yo', 'ok', 'okay', 'oi']);
-  const FILLERS = new Set([...GREETINGS, 'um', 'uh', 'so', 'well', 'and', 'oh', 'now']);
+  // Skippable lead-ins before the name. Moonshine often prepends an article —
+  // observed in the wild: "The clod." for a spoken "clawd" — so articles and
+  // light deictics are skippable too.
+  const FILLERS = new Set([...GREETINGS, 'um', 'uh', 'so', 'well', 'and', 'oh', 'now', 'the', 'that', 'this', 'it', 'is', 'then']);
   // Moonshine renderings of "clawd"/"claude", in two tiers:
   // STRONG — unambiguously the name; these can wake him ALONE ("clawd.").
   // WEAK — common English words the model substitutes for the name; these wake
@@ -22,9 +25,17 @@
     'clawd', 'clawed', 'clod', 'klawd', 'klaud',
     'claude', 'claud', 'klaude', 'clode', 'clawde',
   ]);
-  const WEAK_VARIANTS = new Set(['cloud', 'clause', 'called', 'clad', 'claw', 'quad']);
-  // Common words within edit distance 2 of the name — never treat as it.
-  const STOPWORDS = new Set(['could', 'would', 'should', 'cold', 'call', 'old', 'loud', 'allowed', 'aloud', 'glad', 'clap']);
+  const WEAK_VARIANTS = new Set(['cloud', 'clause', 'called', 'claw', 'quad', 'slowed', 'lawd', 'laud']);
+  // Common words that pass the nets below — never treat as the name.
+  const STOPWORDS = new Set(['could', 'would', 'should', 'cold', 'call', 'old', 'loud', 'allowed', 'aloud', 'glad', 'clad', 'clap', 'clout', 'clot', 'slot', 'slept', 'slid']);
+
+  // Phonetic net: matches the SOUND shape of /klɔːd/ regardless of which
+  // spelling the STT model picked — a kl/gl onset cluster, a back-vowel
+  // nucleus, a d/t coda (claude, clawd, cloud, clawed, clod, klaud, clode…).
+  // This is what makes recognition spelling-independent out of the box.
+  function soundsLikeName(word) {
+    return /^[ckgq]l[aeouw']{1,3}[dt](?:e|ed)?$/.test(word);
+  }
 
   function levenshtein(a, b) {
     if (a === b) return 0;
@@ -47,6 +58,12 @@
   function nameStrength(word) {
     if (STRONG_VARIANTS.has(word)) return 'strong';
     if (STOPWORDS.has(word)) return null;
+    // Anything that phonetically IS the name counts as strong — the spelling
+    // the model chose doesn't matter.
+    if (soundsLikeName(word)) return 'strong';
+    // Softened /k/ onset: the model sometimes renders "clawd" with an sl-
+    // cluster (observed: "Slowed."). Weak tier — implicit-confirm handles it.
+    if (/^sl[aeouw']{1,3}[dt](?:e|ed)?$/.test(word)) return 'weak';
     if (WEAK_VARIANTS.has(word)) return 'weak';
     if (word.length >= 4 && word.length <= 8) {
       const d = Math.min(levenshtein(word, 'clawd'), levenshtein(word, 'claude'));
@@ -102,7 +119,7 @@
   const PREROLL_FRAMES = 6;
   // Onset lowered (2.2 → 1.8, abs 0.008 → 0.006) so quieter / farther speech
   // still triggers capture; the noise filter downstream catches false starts.
-  const ABS_MIN = 0.006, ONSET_MULT = 1.8, RELEASE_MULT = 1.4, NOISE_CAP = 0.04;
+  const ABS_MIN = 0.006, ONSET_MULT = 1.8, RELEASE_MULT = 1.4, NOISE_CAP = 0.03;
 
   let stream = null, ctx = null, source = null, processor = null;
   let running = false;
@@ -196,13 +213,17 @@
       followUntil = now + 8000;
       return;
     }
-    // Only an unambiguous (strong) name arms listening, and not more than once
-    // per 10s — weak variants are common words ambient speech kept tripping.
+    // Only an unambiguous (strong) name arms full listening, and not more than
+    // once per 10s — weak variants are common words ambient speech kept tripping.
     if (strength !== 'strong') {
-      // Diagnostic so failed wakes aren't silent: show what he heard.
+      // Implicit confirm: a weak name-only hit perks him and quietly opens a
+      // SHORT window — keep talking and it's taken as the command; stay silent
+      // and nothing happens. Loose matching with a harmless failure mode.
+      if (window.Crab && window.Crab.wakePerk) window.Crab.wakePerk();
+      followUntil = now + 3500;
       if (now - lastHeardBubbleAt > 30_000 && window.Crab && window.Crab.think) {
         lastHeardBubbleAt = now;
-        window.Crab.think(`heard "${word}" — say "clawd"?`, 3500);
+        window.Crab.think(`heard "${word}" — that you?`, 3000);
       }
       return;
     }
@@ -249,8 +270,14 @@
       const release = Math.max(ABS_MIN * 0.8, noiseFloor * RELEASE_MULT);
 
       if (!speaking) {
-        const k = rms < noiseFloor ? 0.25 : 0.02;
-        noiseFloor = Math.min(noiseFloor + (rms - noiseFloor) * k, NOISE_CAP);
+        // Don't let Clawd's OWN voice (TTS bleeding past echo-cancel) train the
+        // ambient-noise estimate upward — every spoken reply was ratcheting the
+        // wake threshold higher, so he got progressively deafer over a session.
+        const ttsTalking = !!(window.ClawdVoice && window.ClawdVoice.isSpeaking && window.ClawdVoice.isSpeaking());
+        if (!ttsTalking) {
+          const k = rms < noiseFloor ? 0.25 : 0.02;
+          noiseFloor = Math.min(noiseFloor + (rms - noiseFloor) * k, NOISE_CAP);
+        }
         if (rms > onset && !shouldIgnoreCapture()) {
           speaking = true; frames = [...preroll]; speech = 1; silence = 0;
         }
