@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Microphone access under hardened runtime. Without this the macOS mic
+       permission prompt never appears and getUserMedia is silently denied,
+       no matter the NSMicrophoneUsageDescription / askForMediaAccess calls. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <!-- electron-builder's defaults — required for V8/Electron and for loading the
+       SDK's Bun binary + the unsigned ONNX native dylibs. Must be preserved. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

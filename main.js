@@ -428,6 +428,8 @@ ipcMain.handle('stt:warm', async () => {
 });
 
 // Trigger the macOS mic permission prompt (renderer getUserMedia alone won't).
+// On a prior denial macOS won't re-prompt — open System Settings to the mic pane
+// so the user can flip it without hunting.
 ipcMain.handle('mic:request', async () => {
   if (process.platform !== 'darwin') return 'granted';
   const status = systemPreferences.getMediaAccessStatus('microphone');
@@ -436,7 +438,9 @@ ipcMain.handle('mic:request', async () => {
     const ok = await systemPreferences.askForMediaAccess('microphone');
     return ok ? 'granted' : 'denied';
   }
-  return status; // 'denied' | 'restricted' — user must fix in System Settings
+  // 'denied' | 'restricted' — can't re-prompt; send them to the right pane.
+  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+  return status;
 });
 
 // ---- Hands-free wake word (Phase 3) ----
