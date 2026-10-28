@@ -370,6 +370,7 @@ ipcMain.on('chat-send', async (event, text) => {
   // Voice (Phase 1): if enabled, tap the streaming chunks and speak them sentence
   // by sentence via Kokoro. Barge-in: cut any audio still playing from a prior turn.
   const voiceOn = !!prefs.voiceReplies;
+  try { require('./voice/log').vlog('turn', `start: voiceReplies=${voiceOn} voice=${prefs.voiceName || 'af_bella'}`); } catch (_) {}
   let speaker = null;
   if (voiceOn) {
     if (!event.sender.isDestroyed()) event.sender.send('clawd-tts-stop');

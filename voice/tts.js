@@ -139,12 +139,25 @@ async function ensureTts() {
 const cache = new Map();
 const CACHE_MAX = 24;
 
+// Serialize ALL Kokoro generate() calls. A single onnxruntime inference session
+// is not safe to run concurrently — the per-sentence pipeline, the keep-warm
+// tick, and overlapping turns could otherwise hit generate() at the same time
+// and throw / corrupt state (this was the "Clawd went silent" bug). Every call
+// queues behind the previous one.
+let kokoroChain = Promise.resolve();
+function runKokoro(fn) {
+  const next = kokoroChain.then(fn, fn);
+  // Keep the chain alive regardless of this call's outcome.
+  kokoroChain = next.then(() => {}, () => {});
+  return next;
+}
+
 // Local Kokoro synthesis (with prosody contouring — ElevenLabs doesn't need it,
 // its prosody is natural out of the box).
 async function kokoroSynthesize(text, voice, baseSpeed) {
   const speed = speedFor(text, baseSpeed);
   const tts = await getTts();
-  const audio = await tts.generate(text, { voice, speed });
+  const audio = await runKokoro(() => tts.generate(text, { voice, speed }));
   return { samples: audio.audio, rate: audio.sampling_rate };
 }
 
@@ -188,7 +201,7 @@ async function synthesize(text) {
 async function keepWarm() {
   if (loadState !== 'ready') return;
   const tts = await getTts();
-  await tts.generate('hm', { voice: DEFAULT_VOICE, speed: 1.3 });
+  await runKokoro(() => tts.generate('hm', { voice: DEFAULT_VOICE, speed: 1.3 }));
 }
 
 /** Fire-and-forget TLS warmup for the ElevenLabs path — after idle, the first

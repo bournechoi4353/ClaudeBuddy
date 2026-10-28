@@ -70,8 +70,10 @@ function createSpeaker(send, shouldCancel) {
         if (shouldCancel()) return;
         send('clawd-tts-audio', { seq: mySeq, samples: tts.floatToInt16(samples), rate });
       } catch (err) {
-        // TTS failure must never break the (already-displayed) text reply.
-        console.error('[voice] synth failed:', err && err.message ? err.message : err);
+        // TTS failure must never break the (already-displayed) text reply — but
+        // log it to the timing file so a silent crab is diagnosable.
+        const msg = err && err.stack ? err.stack : (err && err.message ? err.message : String(err));
+        try { require('./log').vlog('tts', 'SYNTH FAILED: ' + msg); } catch (_) {}
       }
     });
   };
