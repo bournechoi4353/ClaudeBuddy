@@ -1,0 +1,169 @@
+// Main-process glue for the pet brain. Gathers the raw signals the app can provide
+// (system idle time, frontmost app, music state), feeds them to the event layer, and
+// asks the reaction layer once in a while whether a bubble is due.
+//
+// Only required when the pet brain is active (see pet/flag.js), so with the flag off
+// none of this code is loaded.
+
+const { createEventLayer } = require('./events');
+const { createReactionLayer } = require('./reactions');
+const { petBrainDebug } = require('./flag');
+const { createPetBrain, createWorkerBackend } = require('../vendor/pet-brain/petBrain.js');
+const { reactionFor } = require('../vendor/pet-brain/rules.js');
+const { createWeatherService } = require('./weatherService');
+const { createModelService } = require('./modelService');
+const { routeFor } = require('./router');
+const { MODEL_CONFIG } = require('./config');
+
+const SAMPLE_MS = 1000;      // idle time and activity share
+const MUSIC_MS = 20 * 1000;  // music state, so Spotify is not asked every second
+const EVALUATE_MS = 5 * 1000; // how often to ask whether a bubble is due
+const STATE_DWELL_MS = 10 * 1000; // the sprite pose changes at most this often, except for events
+
+// Outcomes where the pending event should stay queued and try again on the next evaluation.
+const RETRY_REASONS = new Set(['startup-quiet', 'global-gap', 'fullscreen', 'busy', 'error']);
+
+/**
+ * @param {{
+ *   platform: { isFrontmostFullscreen(): Promise<boolean>, getMusicState(): Promise<string> },
+ *   powerMonitor: { getSystemIdleTime(): number },
+ *   emit?: (channel: string, payload: object) => void,
+ *   getPrefs?: () => object,
+ *   now?: () => number,
+ *   env?: object,
+ *   createBrain?: () => object,
+ *   modelService?: object,
+ *   createWorkerBackend?: Function,
+ *   verifyModel?: Function,
+ *   defaultModelPath?: string,
+ * }} deps
+ */
+function createPetController(deps) {
+  const { platform, powerMonitor, emit = () => {}, getPrefs = () => ({}), now = Date.now, env = process.env } = deps;
+  const log = petBrainDebug(env) ? (message) => console.log(`[pet-brain] ${message}`) : () => {};
+
+  const events = createEventLayer();
+
+  // Smart lines. Ambient lines are the only thing routed to the local model (see pet/router.js);
+  // with Smart lines off, or the model missing, the service hands every line back to the built-in bank.
+  const model = deps.modelService || createModelService({
+    getPrefs, env, log, now,
+    defaultModelPath: deps.defaultModelPath || null,
+    createWorkerBackend: deps.createWorkerBackend || createWorkerBackend,
+    verify: deps.verifyModel,
+  });
+  const createBrain = deps.createBrain || (() => (routeFor('ambient') === 'local'
+    // The reaction layer already spaces lines by a minute or more, so petBrain's own 3 s gap between model calls adds nothing.
+    ? createPetBrain({ backend: model.backend, timeoutMs: MODEL_CONFIG.timeoutMs, cooldownMs: 0 })
+    : createPetBrain({})));
+
+  const reactions = createReactionLayer({
+    now,
+    log,
+    createBrain,
+    takeFallbackReason: () => model.takeFallbackReason(),
+    isFullscreen: () => platform.isFrontmostFullscreen(),
+    chattiness: getPrefs().petChattiness,
+  });
+
+  // Weather mood is opt-in: the service stays idle until configureWeather() enables it.
+  const weather = createWeatherService({
+    createSource: deps.createWeatherSource,
+    onPose: (pose) => { log(`weather pose: ${pose}`); emit('pet-brain-weather', { pose }); },
+  });
+
+  let frontApp = '';
+  let music = 'none';
+  let evaluating = false;
+  let timers = [];
+  let lastLive = null;      // reaction the sprite pose last followed
+  let lastLiveAt = -Infinity;
+
+  function sample() {
+    let idleSec = 0;
+    try { idleSec = powerMonitor.getSystemIdleTime(); } catch (_) {}
+    events.ingest({ at: now(), frontApp, idleSec, music });
+  }
+
+  async function refreshMusic() {
+    try { music = await platform.getMusicState(); } catch (_) { music = 'none'; }
+  }
+
+  /** One evaluation: read the signals and show a bubble if the reaction layer allows it. */
+  async function evaluate() {
+    if (evaluating) return null;
+    evaluating = true;
+    try {
+      const at = now();
+      const signals = events.read(at, { consume: false });
+
+      // Keep the sprite pose in step with what the rules see, without flicker.
+      const live = reactionFor(signals);
+      if (live !== lastLive && (signals.event !== 'none' || at - lastLiveAt >= STATE_DWELL_MS)) {
+        lastLive = live;
+        lastLiveAt = at;
+        emit('pet-brain-state', { reaction: live });
+      }
+
+      const decision = await reactions.consider(signals);
+      if (!RETRY_REASONS.has(decision.reason)) events.read(at); // the event was dealt with: consume it
+      if (decision.ok) {
+        log(`signals ${JSON.stringify(signals)}`);
+        emit('pet-brain-bubble', { reaction: decision.reaction, line: decision.line, source: decision.source });
+      }
+      return decision;
+    } finally {
+      evaluating = false;
+    }
+  }
+
+  function start() {
+    if (timers.length) return;
+    refreshMusic();
+    timers = [
+      setInterval(sample, SAMPLE_MS),
+      setInterval(refreshMusic, MUSIC_MS),
+      setInterval(() => { evaluate().catch(() => {}); }, EVALUATE_MS),
+    ];
+    log('started');
+  }
+
+  function stop() {
+    for (const t of timers) clearInterval(t);
+    timers = [];
+    log('stopped');
+  }
+
+  return {
+    start,
+    stop,
+    sample,
+    evaluate,
+    /** Called by the existing frontmost-app poll in main.js. */
+    noteFrontApp(name) { if (typeof name === 'string') frontApp = name; },
+    /** For an external source, such as a shell or editor hook, to report build or error events. */
+    pushEvent(name) { events.pushEvent(name, now()); },
+    /**
+     * Smart lines or the model path changed in Preferences. A fresh brain starts the model's
+     * failure counter over, so turning it on again always gets a clean try.
+     */
+    configureModel() {
+      model.configure();
+      reactions.resetLineHistory();
+    },
+    /** For the Preferences status line: { enabled, path, found, state, lastLatencyMs, ..., line }. */
+    modelStatus: () => ({ ...model.status(), line: model.statusLine() }),
+    /** { enabled, place } from the user's preferences. */
+    configureWeather: (settings) => weather.configure(settings),
+    setChattiness: (level) => reactions.setChattiness(level),
+    resetLineHistory: () => reactions.resetLineHistory(),
+    resetTimers: () => reactions.resetTimers(),
+    dispose() {
+      stop();
+      weather.stop();
+      return Promise.all([reactions.dispose(), model.dispose()]).then(() => {});
+    },
+  };
+}
+
+module.exports = { createPetController };

@@ -4,11 +4,10 @@
 const chatEl = document.getElementById('chat');
 const historyEl = document.getElementById('history');
 const inputEl = document.getElementById('input');
-const micBtn = document.getElementById('micBtn');
 
 const PANEL_W = 240;
 const PANEL_MARGIN = 8;
-let NAME = 'clawd';
+let NAME = 'drizzle';
 if (window.crabAPI && window.crabAPI.getPrefs) {
   window.crabAPI.getPrefs().then((p) => {
     if (p && typeof p.petName === 'string' && p.petName) NAME = p.petName;
@@ -45,11 +44,6 @@ window.crabAPI.onChatPiece((piece) => {
     }
     currentReplyEl.textContent += piece.text;
     historyEl.scrollTop = historyEl.scrollHeight;
-    // Voice turn with the panel closed → stream the reply into the bubble.
-    if (voiceTurn) {
-      voiceReplyText += piece.text;
-      if (window.Crab && window.Crab.thinkUpdate) window.Crab.thinkUpdate(voiceReplyText.trim(), 12000);
-    }
   } else if (piece.type === 'error') {
     // Map common SDK-level errors to in-character messages instead of leaking
     // raw error strings to the user.
@@ -62,23 +56,15 @@ window.crabAPI.onChatPiece((piece) => {
     } else if (raw.includes('network') || raw.includes('econn') || raw.includes('fetch failed')) {
       friendly = "can't reach the internet right now. check your wifi?";
     } else if (raw.includes('sdk load')) {
-      friendly = 'something\'s off with my brain. try restarting clawd?';
+      friendly = 'something\'s off with my brain. try restarting me?';
     } else {
       friendly = "hmm, something went sideways. try again?";
     }
     addMessage('crab', friendly);
-    if (voiceTurn && window.Crab && window.Crab.thinkUpdate) window.Crab.thinkUpdate(friendly, 6000);
     currentReplyEl = null;
   } else if (piece.type === 'done') {
     currentReplyEl = null;
     inFlight = false;
-    if (voiceTurn) {
-      // Let the finished bubble linger a beat, then fade.
-      if (voiceReplyText.trim() && window.Crab && window.Crab.thinkUpdate) {
-        window.Crab.thinkUpdate(voiceReplyText.trim(), 7000);
-      }
-      voiceTurn = false;
-    }
     if (window.Crab && window.Crab.setListening) window.Crab.setListening(false);
     if (window.Crab && window.Crab.clearAccessory) window.Crab.clearAccessory();
   }
@@ -168,97 +154,29 @@ function addMessage(who, text) {
   historyEl.scrollTop = historyEl.scrollHeight;
 }
 
-// Send a message through the agent. Shared by the text input (Enter), the mic
-// button, and the hands-free wake word. Voice-initiated turns with the panel
-// CLOSED stay closed — the reply streams into the crab's thought bubble instead
-// (and is spoken aloud). The exchange still lands in the panel history, so
-// clicking the crab later shows the full conversation.
-let voiceTurn = false;
-let voiceReplyText = '';
-function submit(text, opts) {
-  const t = (text || '').trim();
-  if (!t || inFlight) return;
-  const fromVoice = !!(opts && opts.voice);
-  if (!isOpen && !fromVoice) open(window.Crab.getBbox());
-  voiceTurn = fromVoice && !isOpen;
-  voiceReplyText = '';
-  // State cue: the wake flow's "listening…" bubble would otherwise linger
-  // through the whole think-time. Flip it the moment the command is in; the
-  // streaming reply text then overwrites this.
-  if (voiceTurn && window.Crab && window.Crab.think) window.Crab.think('thinking…', 20000);
-  addMessage('you', t);
-  inputEl.value = '';
-  inFlight = true;
-  window.Crab.noteInteraction && window.Crab.noteInteraction();
-  window.Crab.setListening && window.Crab.setListening(true);
-  window.crabAPI.sendChatMessage(t);
-  // After the user names the crab the panel should behave normally on next open.
-  if (window.Crab && window.Crab.endOnboarding) window.Crab.endOnboarding();
-}
-
-// Show a non-agent system line (e.g. a mic-permission hint) in the panel.
-function systemNote(text) {
-  if (!isOpen) open(window.Crab.getBbox());
-  addMessage('crab', text);
-}
-
 inputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    submit(inputEl.value);
+    if (inFlight) return;
+    const text = inputEl.value.trim();
+    if (!text) return;
+    addMessage('you', text);
+    inputEl.value = '';
+    inFlight = true;
+    window.Crab.noteInteraction && window.Crab.noteInteraction();
+    window.Crab.setListening && window.Crab.setListening(true);
+    window.crabAPI.sendChatMessage(text);
+    // After the user names the crab the panel should behave normally on next open.
+    if (window.Crab && window.Crab.endOnboarding) window.Crab.endOnboarding();
   } else if (e.key === 'Escape') {
     close();
   }
   e.stopPropagation();
 });
 
-// ---- Mic button (voice input) ----
-// Reflect capture state on the button. Called by renderer/audio.js.
-function setMicState(state) {
-  if (!micBtn) return;
-  micBtn.classList.toggle('recording', state === 'recording');
-  micBtn.classList.toggle('busy', state === 'transcribing');
-}
-
-let micWarmed = false;
-if (micBtn) {
-  micBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (!window.ClawdMic) return;
-    // Already capturing → stop + transcribe.
-    if (window.ClawdMic.isCapturing()) {
-      window.ClawdMic.stop();
-      return;
-    }
-    // Start: make sure we have mic permission, warm the model once, then capture.
-    micBtn.classList.add('busy');
-    let status = 'granted';
-    try {
-      if (window.crabAPI && window.crabAPI.requestMic) status = await window.crabAPI.requestMic();
-    } catch (_) {}
-    micBtn.classList.remove('busy');
-    if (status !== 'granted') {
-      systemNote('i need microphone access — turn it on in System Settings → Privacy & Security → Microphone, then tap the mic again.');
-      return;
-    }
-    if (!micWarmed) {
-      micWarmed = true;
-      window.crabAPI && window.crabAPI.warmStt && window.crabAPI.warmStt();
-    }
-    window.ClawdMic.start();
-  });
-  // Don't let a mousedown on the button bubble to the document handler that
-  // would otherwise treat it as an outside-click and close the chat.
-  micBtn.addEventListener('mousedown', (e) => e.stopPropagation());
-}
-
 window.Chat = {
   open,
   close,
-  submit,
-  systemNote,
-  setMicState,
-  isBusy: () => inFlight,
   isOpen: () => isOpen,
   containsPoint(x, y) {
     if (!isOpen) return false;

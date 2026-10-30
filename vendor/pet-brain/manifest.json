@@ -1,0 +1,118 @@
+{
+  "name": "pet-brain",
+  "package_version": "0.2.0",
+  "persona": "Roommate (deadpan roommate)",
+  "recommendation": "Ship the canned bank only (no model download). The fine-tuned model lost the blind comparison to the canned bank and misses the quality gate. See SHIP_REPORT_2.md.",
+  "canned_bank": {
+    "file": "canned.json",
+    "lines_per_reaction": {
+      "min": 5,
+      "max": 5
+    },
+    "lines": 120,
+    "source": "the owner's picks from a 12-per-reaction draft (288 lines, kept outside the package as ship/canned.full.json)",
+    "shown_in_cycles": "every line of a reaction once, shuffled, before any repeat; never the same line twice in a row"
+  },
+  "model": {
+    "optional": true,
+    "file": "deadpan_v1_qwen3.5-0.8b-q4_k_m.gguf",
+    "sha256": "30ceea68bcdf1862e31ee2036c71999b001c32853c44fa3a99a423da23f303b5",
+    "size_bytes": 541903584,
+    "quantization": "q4_k_m",
+    "format": "GGUF",
+    "base_model": "Qwen/Qwen3.5-0.8B",
+    "base_model_license": {
+      "id": "Apache-2.0",
+      "verified_from": "LICENSE file in the Hugging Face repo Qwen/Qwen3.5-0.8B (full Apache License 2.0 text, read on 2026-10-29)",
+      "license_file_in_package": "LICENSE-Qwen3.5-base-model.txt",
+      "license_file_sha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"
+    },
+    "data_version": "deadpan_v1",
+    "training": {
+      "method": "LoRA, bf16, Unsloth",
+      "epochs": 3,
+      "seed": 3407,
+      "train_seconds": 172.1,
+      "config": "configs/deadpan_v1_qwen3.5-0.8b.yaml"
+    },
+    "prompt": {
+      "system": "You are a deadpan roommate: dry, understated, quietly on the user's side. Reply with one plain line of 4 to 14 words that fits the reaction.",
+      "user_format": 2
+    },
+    "download_url": null
+  },
+  "runtime": {
+    "node_llama_cpp": "3.22.2",
+    "node": ">=20",
+    "inference": "CPU only (gpu: false), in a worker thread; only loaded when a model path exists",
+    "default_timeout_ms": 1500
+  },
+  "eval": {
+    "source": "eval/results/deadpan_eval_final.json",
+    "note": "Measured on Linux x86-64 (Intel i5-10400, 6 threads). Not measured on macOS or inside Electron. Quality and blind-pair results are self-judgments.",
+    "generations": 500,
+    "line_validity_pct": 99.8,
+    "truncated_lines": 0,
+    "banned_word_violations": 0,
+    "signal_restating_pct": 1.4,
+    "distinct_line_ratio_per_pass": 0.998,
+    "latency_ms": {
+      "median": 618,
+      "p95": 821,
+      "p99": 962,
+      "max": 1188
+    },
+    "self_judged_quality": {
+      "note": "SELF-JUDGMENT by the same model (Claude) that built the evaluation and wrote the data. Not independent, and not blind to the fact that all 60 lines are model output (shuffled, with run and row ids hidden). Rubric: in character = dry, understated deadpan roommate on the user's side, no watching flavor; fits the reaction = matches the reaction and does not contradict the signals or invent facts; natural = fluent plain English. 5 = clearly good, 3 = acceptable but plain or slightly off, 1 = bad.",
+      "items": 60,
+      "in_character": 2.98,
+      "fits_reaction": 4.08,
+      "natural": 3.92,
+      "mean_of_three": 3.66
+    },
+    "blind_pairs_vs_canned": {
+      "pairs": 60,
+      "modelWins": 14,
+      "cannedWins": 44,
+      "ties": 2,
+      "modelWinRatePct": 24.2,
+      "criteria": {
+        "funnier": {
+          "model": 12,
+          "canned": 44,
+          "tie": 4
+        },
+        "in_character": {
+          "model": 12,
+          "canned": 42,
+          "tie": 6
+        }
+      }
+    },
+    "blind_pairs_vs_canned_owner": {
+      "pairs": 30,
+      "modelWins": 9,
+      "cannedWins": 18,
+      "ties": 3,
+      "modelWinRatePct": 36.7,
+      "criteria": {
+        "funnier": {
+          "model": 9,
+          "canned": 18,
+          "tie": 3
+        },
+        "character": {
+          "model": 10,
+          "canned": 17,
+          "tie": 3
+        }
+      }
+    },
+    "blind_pairs_note": "both comparisons used the full 288-line draft, not the shipped 120-line subset",
+    "v1_model_on_same_inputs": {
+      "signal_restating_pct": 90.8,
+      "exclaim_lines_pct": 34.6,
+      "validity_pct": 97.2
+    }
+  }
+}

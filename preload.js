@@ -18,20 +18,23 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onNotify: (callback) => {
     ipcRenderer.on('clawd-notify', (_e, info) => callback(info));
   },
-  onTtsAudio: (callback) => {
-    ipcRenderer.on('clawd-tts-audio', (_e, info) => callback(info));
+  // Pet brain (only fires when PET_BRAIN_LOCAL=1).
+  onPetState: (callback) => {
+    ipcRenderer.on('pet-brain-state', (_e, info) => callback(info));
   },
-  onTtsStop: (callback) => {
-    ipcRenderer.on('clawd-tts-stop', () => callback());
+  onPetBubble: (callback) => {
+    ipcRenderer.on('pet-brain-bubble', (_e, info) => callback(info));
   },
-  // Voice input (mic button in the chat panel).
-  requestMic: () => ipcRenderer.invoke('mic:request'),
-  warmStt: () => ipcRenderer.invoke('stt:warm'),
-  transcribe: (samples) => ipcRenderer.invoke('stt:transcribe', samples),
-  // Hands-free wake word: main toggles it on/off.
-  onHandsFree: (callback) => {
-    ipcRenderer.on('clawd-hands-free', (_e, info) => callback(info));
+  onPetWeather: (callback) => {
+    ipcRenderer.on('pet-brain-weather', (_e, info) => callback(info));
   },
+  findPlaces: (name) => ipcRenderer.invoke('pet-brain:geocode', name),
+  getModelStatus: () => ipcRenderer.invoke('pet-brain:model-status'),
+  pickModelFile: () => ipcRenderer.invoke('pet-brain:pick-model'),
+  onPetDebug: (callback) => {
+    ipcRenderer.on('pet-brain-debug', (_e, info) => callback(info));
+  },
+  resetPetLines: () => ipcRenderer.send('pet-brain:reset-lines'),
   getPrefs: () => ipcRenderer.invoke('prefs:get'),
   setPref: (updates) => ipcRenderer.send('prefs:set', updates),
   onPrefsUpdated: (callback) => {

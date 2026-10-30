@@ -1,0 +1,97 @@
+{
+  "name": "Roommate",
+  "min_words": 4,
+  "max_words": 14,
+  "max_exclaim_share": 0.05,
+  "max_restate_share": 0.1,
+  "duration_words": [
+    "long",
+    "ages",
+    "forever",
+    "hours",
+    "days",
+    "weeks",
+    "still"
+  ],
+  "pressure_phrases": [
+    "you should",
+    "you must",
+    "you have to",
+    "you need to",
+    "hurry",
+    "right now",
+    "immediately",
+    "get back to work",
+    "stop procrastinating"
+  ],
+  "restate_words": {
+    "app": [
+      "editor",
+      "terminal",
+      "browser",
+      "docs",
+      "documentation",
+      "video",
+      "videos",
+      "game",
+      "games",
+      "gaming",
+      "chat",
+      "chatting",
+      "window",
+      "windows",
+      "tab",
+      "tabs"
+    ],
+    "hour": [
+      "midnight",
+      "noon",
+      "midday",
+      "morning",
+      "afternoon",
+      "evening",
+      "night",
+      "tonight",
+      "lunch",
+      "lunchtime",
+      "breakfast",
+      "dinner",
+      "dawn",
+      "sunrise",
+      "sunset",
+      "bedtime",
+      "clock"
+    ],
+    "idle": [
+      "seconds",
+      "second",
+      "minutes",
+      "minute",
+      "hours",
+      "hour",
+      "idle"
+    ],
+    "typing": [
+      "typing",
+      "typed",
+      "type",
+      "typist",
+      "keyboard",
+      "keys",
+      "key",
+      "fingers"
+    ],
+    "music": [
+      "music",
+      "song",
+      "songs",
+      "tune",
+      "tunes",
+      "playlist",
+      "track",
+      "tracks",
+      "album",
+      "volume"
+    ]
+  }
+}

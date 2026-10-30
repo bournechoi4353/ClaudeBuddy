@@ -10,10 +10,10 @@ const { z } = require('zod');
 const platform = require('./platform');
 
 // Where the tray icon lives differs by OS, so error strings that tell the user
-// to open Clawd's menu point at the right place.
+// to open the app's menu point at the right place.
 const TRAY_HINT = platform.IS_MAC
-  ? "click the clawd label in your menubar"
-  : "right-click the clawd crab icon in your system tray (bottom-right, near the clock)";
+  ? "click the tray icon in your menubar"
+  : "right-click the tray icon in your system tray (bottom-right, near the clock)";
 
 // Tools backed by macOS apps (Notes, Mail.app, Calendar.app, AppleScript browser
 // reading) have no clean Windows equivalent yet. Rather than throw a confusing

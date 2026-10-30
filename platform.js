@@ -205,10 +205,64 @@ async function getBattery() {
   return null;
 }
 
+// macOS: is the frontmost app's front window in native full screen? Reading the
+// AXFullScreen attribute needs the same Accessibility permission as the window
+// title lookup above; without it this reports false.
+const MAC_FULLSCREEN_OSA = `tell application "System Events"
+set frontProc to first application process whose frontmost is true
+try
+return (value of attribute "AXFullScreen" of front window of frontProc) as text
+on error
+return "false"
+end try
+end tell`;
+
+// Windows: SHQueryUserNotificationState reports 2 (busy, a full-screen app),
+// 3 (Direct3D full screen) or 4 (presentation mode) when the user should not be
+// interrupted. UNTESTED on Windows.
+const WIN_FULLSCREEN_PS = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class UserNotifState {
+  [DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state);
+}
+"@
+$state = 0
+[void][UserNotifState]::SHQueryUserNotificationState([ref]$state)
+[Console]::Out.Write([string]$state)
+`;
+
+// True when a full-screen app or a presentation is in front. Any failure means false.
+async function isFrontmostFullscreen() {
+  try {
+    if (IS_MAC) return (await osascript(MAC_FULLSCREEN_OSA)).trim() === 'true';
+    if (IS_WIN) return ['2', '3', '4'].includes((await powershell(WIN_FULLSCREEN_PS)).trim());
+  } catch (_) {}
+  return false;
+}
+
+// Spotify playback state as 'playing', 'paused' or 'none'. macOS only, and it only
+// talks to Spotify when the app is already running, so it never launches it. On
+// Windows this reports 'none' (the Web API route would be a network call).
+async function getMusicState() {
+  if (!IS_MAC) return 'none';
+  try {
+    const count = await osascript('tell application "System Events" to count (every process whose name is "Spotify")');
+    if (!(parseInt(count, 10) > 0)) return 'none';
+    const state = await osascript('tell application "Spotify" to get player state as text');
+    if (state === 'playing') return 'playing';
+    if (state === 'paused') return 'paused';
+  } catch (_) {}
+  return 'none';
+}
+
 module.exports = {
   IS_MAC,
   IS_WIN,
   getFrontmostApp,
   getFrontmostWindow,
   getBattery,
+  isFrontmostFullscreen,
+  getMusicState,
 };

@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const tools = require('./tools');
+const { petBrainActive } = require('./pet/flag');
 const { app: electronApp } = require('electron');
 
 // Read prefs at chat-time so changes from the Preferences window take effect
@@ -44,13 +45,17 @@ function resolveClaudeBinary() {
 }
 const CLAUDE_BIN = resolveClaudeBinary();
 
-const SYSTEM_PROMPT_TEMPLATE = `You are __NAME_CAP__, a small 8-bit pixel crab who lives on the user's desktop. You are also Claude under the shell — you can answer real questions — but you speak in a small-crab voice:
+// The one place the chat model is chosen. The system prompt names it too (modelNote),
+// so changing it here keeps what the pet says about itself true.
+const AGENT_MODEL = { id: 'claude-sonnet-4-6', label: 'claude sonnet 4.6' };
+
+const SYSTEM_PROMPT_TEMPLATE = `You are __NAME_CAP__, a small 8-bit pixel __SPECIES__ who lives on the user's desktop. You are also Claude under the shell — you can answer real questions — but you speak in a small-__SPECIES__ voice:
 
 - always lowercase
 - 1 or 2 short sentences max
 - no emojis, no markdown, no bullet points, no headers
-- a little sleepy, a little playful, occasionally side-track for a half-second on something crabby ("...hmm. anyway.")
-- if asked who you are: "i'm __NAME__. a crab. also claude, kind of."
+- a little sleepy, a little playful, occasionally side-track for a half-second on something __QUIRK__ ("...hmm. anyway.")
+- if asked who you are: "i'm __NAME__. a __SPECIES__. also claude, kind of."
 
 you have these tools:
 - now() — current time and day.
@@ -72,7 +77,7 @@ you have these tools:
 - drive_search(query) — search Google Drive for files by name; returns IDs.
 - docs_read(documentId) — read a Google Doc's text content by ID (use drive_search to find the ID first).
 - get_recent_emails(count), search_emails(query), send_email(to, subject, body) — FALLBACK Mail.app tools for users not on Gmail / not connected to Google.
-- start_timer(minutes, label), list_timers(), cancel_timer(id) — countdown timers; when one ends Clawd hops and shows the label in a bubble.
+- start_timer(minutes, label), list_timers(), cancel_timer(id) — countdown timers; when one ends you react and show the label in a bubble.
 - read_clipboard() — read the user's current clipboard text. Use for "what did i copy", "read my clipboard", "save what i copied as a note" (chain with save_note), "translate my clipboard" (read first, then answer).
 - set_clipboard(text) — put text on the user's clipboard so they can paste it. Use for "copy this", "put X on my clipboard", or when the user asks you to produce something they obviously need to paste somewhere (a code snippet, a generated phrase, an email draft).
 - consult_codex(prompt, context?) — delegate a code-heavy question to the OpenAI Codex CLI running on the user's machine. Codex is a programmer-tuned model that complements your generalist strengths. Use it as a "second opinion" or for tasks you're less confident on. ALWAYS call this proactively for: debugging code the user shares, low-level systems / kernel / driver questions, obscure language gotchas (C++ template metaprogramming, Rust lifetimes, Go memory model), library API specifics, regex authoring, SQL query optimization, complex algorithm design, build/compiler error diagnosis. NOT for: simple syntax questions, "what does this code do" explanations, general programming concepts (you handle those fine). After calling it, take the codex output and rewrite it in your own small-crab voice — 1 or 2 sentences. NEVER paste the raw codex output. If consult_codex returns "codex isn't installed", just answer the question yourself with your own knowledge and don't mention codex.
@@ -90,7 +95,7 @@ decision rules:
 - "google" / "in google" = Google Chrome the browser; default to read_browser_tab (it uses chrome by default).
 - IMPORTANT — when you DO look at a screen/window, you MUST describe what you actually see, even if the user's target isn't there. NEVER reply with a flat "i don't see that" or "no". instead say what you found: "i see chrome but it's on github not your website", "i see your inbox in chrome — no clawdbuddy tab visible", "this looks like a stackoverflow page". if the user's content might be on a different tab, suggest they switch to it. honesty beats guessing.
 - "what's my next meeting" / "what's on my calendar" / "any events today" → calendar_events
-- "delete X from my calendar" / "cancel my X meeting" / "remove that event" → delete_calendar_event. If the user gave a time, pass it as the "start" arg (ISO 8601). If the tool returns multiple matches, list them in crab voice and ask the user which one — never guess.
+- "delete X from my calendar" / "cancel my X meeting" / "remove that event" → delete_calendar_event. If the user gave a time, pass it as the "start" arg (ISO 8601). If the tool returns multiple matches, list them in __SPECIES__ voice and ask the user which one — never guess.
 - "is it cold / raining / do i need a jacket" → weather
 - "save this" / "remember this" / "make a note" → save_note
 - "what did i note" / "read my notes" → get_notes
@@ -100,7 +105,7 @@ decision rules:
 - "find my doc about X" / "look for the Y file in drive" → drive_search
 - "read the doc <id>" / "read my <doc name>" → drive_search to find ID, then docs_read
 - if the user asks about a Google Doc currently open in Chrome and doesn't reference Drive → read_browser_tab is also fine
-- if a Google tool returns "google isn't connected", tell the user to click clawd menubar → Connect Google.
+- if a Google tool returns "google isn't connected", tell the user to open the tray menu (the icon in the menubar) → Connect Google.
 - "start a X minute timer" / "pomodoro" / "remind me in X" → start_timer
 - "what timers" / "how long left" → list_timers
 - "play <song name>" → ALWAYS call spotify_play. NEVER call spotify_search, NEVER suggest the user "search yourself" or "look it up in spotify", NEVER tell them to play it manually. spotify_play is the only acceptable response to a play request.
@@ -113,7 +118,7 @@ decision rules:
 - "what's playing" → spotify_status
 - code-heavy or debugging questions ("why does this fail", "fix this regex", "what's wrong with my segfault", "rewrite this in idiomatic rust", etc.) → call consult_codex with the user's question (and any code they pasted) as prompt. Then summarize the result in 1–2 small-crab sentences.
 
-call tools only when relevant. don't volunteer them every turn. after a tool call, weave the result into one or two short crab-voice sentences — never read raw output back, never narrate which tool you used.
+call tools only when relevant. don't volunteer them every turn. after a tool call, weave the result into one or two short __SPECIES__-voice sentences — never read raw output back, never narrate which tool you used.
 
 never break character into long-form replies. brevity is the whole point — the user is reading this in a tiny speech bubble.`;
 
@@ -135,15 +140,27 @@ function platformNote() {
     'open and active once), so prefer spotify_play and the playback controls as usual.';
 }
 
+// Without this the model has no way to know which version it is and answers "not sure".
+// Single-quote concatenation only, same as platformNote().
+function modelNote(species) {
+  return '\n\nmodel note: the model running you is ' + AGENT_MODEL.label + ', made by anthropic. ' +
+    'if asked which model or version you are, say so plainly in your small-' + species + ' voice. do not guess other versions.';
+}
+
 function buildSystemPrompt() {
   const prefs = readPrefsForPrompt();
-  const name = (prefs.petName || 'clawd').toString().toLowerCase();
+  const name = (prefs.petName || 'drizzle').toString().toLowerCase();
   const nameCap = name.charAt(0).toUpperCase() + name.slice(1);
   const personality = prefs.personality || 'default';
   const addon = PERSONALITY_ADDONS[personality] || '';
+  // The pet is a raincloud while the pet brain is on (see renderer/petSprite.js), a crab otherwise.
+  const raincloud = petBrainActive(prefs, process.env);
+  const species = raincloud ? 'raincloud' : 'crab';
   return SYSTEM_PROMPT_TEMPLATE
     .replace(/__NAME_CAP__/g, nameCap)
-    .replace(/__NAME__/g, name) + addon + platformNote();
+    .replace(/__NAME__/g, name)
+    .replace(/__SPECIES__/g, species)
+    .replace(/__QUIRK__/g, raincloud ? 'cloudy' : 'crabby') + addon + modelNote(species) + platformNote();
 }
 
 let sdk = null;
@@ -245,18 +262,17 @@ async function startSession() {
     // Latency: don't ship the built-in Claude Code toolset's schemas (Bash/Read/
     // Edit/...) every turn — Clawd only uses its own MCP tools.
     tools: [],
-    // Latency: replies are 1-2 spoken-style sentences; extended thinking only
-    // delays the first token (and therefore first audio).
+    // Latency: replies are 1-2 short sentences; extended thinking only delays
+    // the first token.
     thinking: { type: 'disabled' },
     includePartialMessages: true,
-    model: 'claude-sonnet-4-6',
+    model: AGENT_MODEL.id,
     permissionMode: 'bypassPermissions',
   };
   if (CLAUDE_BIN) options.pathToClaudeCodeExecutable = CLAUDE_BIN;
 
   const q = loadedSdk.query({ prompt: input, options });
   alive = true;
-  try { require('./voice/log').vlog('agent', 'session spawned'); } catch (_) {}
   void consume(q);
 }
 
@@ -289,7 +305,6 @@ async function consume(q) {
   } finally {
     alive = false;
     input = null;
-    try { require('./voice/log').vlog('agent', 'session ended'); } catch (_) {}
   }
 }
 

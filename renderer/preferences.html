@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Clawd Preferences</title>
+  <title>Drizzle Preferences</title>
   <style>
     html, body {
       margin: 0;
@@ -70,6 +70,31 @@
       color: #888;
       margin-top: 3px;
     }
+    h2 {
+      font-size: 12px;
+      margin: 24px 0 0;
+      padding-top: 14px;
+      border-top: 1px solid #ddd;
+      letter-spacing: 0.5px;
+    }
+    label.check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 11px;
+      color: #333;
+    }
+    button {
+      font-family: inherit;
+      font-size: 11px;
+      padding: 5px 10px;
+      border: 1px solid #000;
+      background: #fff;
+      color: #000;
+      cursor: pointer;
+    }
+    button:hover { background: #f0eada; }
     .footer {
       margin-top: 24px;
       padding-top: 14px;
@@ -80,16 +105,12 @@
   </style>
 </head>
 <body>
-  <h1>Clawd Preferences</h1>
+  <h1>Drizzle Preferences</h1>
   <div class="subtitle">Changes save automatically.</div>
 
   <label class="field" for="petName">Pet name</label>
-  <input type="text" id="petName" placeholder="clawd" maxlength="20">
-  <div class="hint">What the crab calls himself in chat.</div>
-
-  <label class="field" for="elKey">ElevenLabs API key (optional)</label>
-  <input type="password" id="elKey" placeholder="sk_…" autocomplete="off">
-  <div class="hint">Premium cloud voice for spoken replies. Leave empty to use the free built-in voice. Get a key at elevenlabs.io → My Account → API Keys. Uses your ElevenLabs quota; stored in plain text in prefs.json.</div>
+  <input type="text" id="petName" placeholder="drizzle" maxlength="20">
+  <div class="hint">What the pet calls itself in chat.</div>
 
   <label class="field" for="personality">Personality</label>
   <select id="personality">
@@ -127,6 +148,50 @@
 
   <label class="field" for="sleepMin">Sleep after no chat: <output id="sleepMinVal">3</output> min</label>
   <input type="range" id="sleepMin" min="1" max="30" step="1">
+
+  <div id="petBrainSection" hidden>
+    <h2>Pet brain</h2>
+    <label class="check"><input type="checkbox" id="petBrainOn"> Pet brain on</label>
+    <div class="hint">The raincloud reacts to what you are doing and says a short line now and then. Lines come from a built-in set. Nothing leaves this machine.</div>
+
+    <label class="field" for="petChattiness">Chattiness</label>
+    <select id="petChattiness">
+      <option value="low">Low: rare bubbles</option>
+      <option value="normal">Normal</option>
+      <option value="high">High: chatty</option>
+    </select>
+    <div class="hint">Scales how long the pet waits between bubbles.</div>
+
+    <div class="row" style="margin-top:12px">
+      <button type="button" id="petResetLines">Reset line history</button>
+      <span class="hint" id="petResetNote" style="margin-top:0"></span>
+    </div>
+
+    <label class="field" for="petSmart">Smart lines</label>
+    <select id="petSmart">
+      <option value="off">Off: built-in lines only</option>
+      <option value="on">On: local model, built-in lines as backup</option>
+    </select>
+    <div class="hint">A small language model on this Mac writes the line instead of picking one from the built-in set. It runs here and nothing leaves this machine. It uses about 1.5 GB of memory while loaded and unloads after 10 minutes without a line. The first line after it loads or unloads still comes from the built-in set.</div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="petModelPath" placeholder="default location" maxlength="1024" style="flex:1">
+      <button type="button" id="petModelBrowse">Browse</button>
+    </div>
+    <div class="hint" id="petModelStatus"></div>
+
+    <label class="check"><input type="checkbox" id="petWeatherOn"> Weather mood</label>
+    <div class="hint">Off by default. When on, the pet sends only a rounded latitude and longitude (about 1 km) to Open-Meteo.com every 15 minutes or more, with no account or identifier, so the cloud can match the weather when it is idle. Like any web request, it reveals your IP address to them. Typing a city sends that name to Open-Meteo once, when you press Find.</div>
+    <div id="petWeatherBox" hidden>
+      <label class="field" for="petCity">City</label>
+      <div class="row">
+        <input type="text" id="petCity" placeholder="for example Ashburn, Virginia" maxlength="80" style="flex:1">
+        <button type="button" id="petFind">Find</button>
+      </div>
+      <select id="petPlaces" hidden></select>
+      <div class="hint" id="petPlaceNote"></div>
+    </div>
+    <div class="hint">Weather data by Open-Meteo.com (CC BY 4.0)</div>
+  </div>
 
   <div class="footer">Other settings live in the menubar (size, monitor, Spotify, launch at login).</div>
 
