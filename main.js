@@ -1,18 +1,7 @@
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, session, systemPreferences, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-
-// Voice replies (Phase 1): Clawd speaks his answers via local Kokoro TTS. Opt-in,
-// off by default — the model is lazy-loaded on first spoken reply so startup is
-// untouched when voice is off. Web Audio must be allowed to autoplay without a
-// user gesture (replies play with no click preceding them).
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-const voicePipeline = require('./voice/pipeline');
-const voiceTts = require('./voice/tts');
-// Voice in (Phase 2): push-to-talk speech-to-text via local Moonshine in an
-// Electron utilityProcess (no system Node). Opt-in, off by default.
-const voiceStt = require('./voice/stt');
 
 // Tiny prefs file so user choices survive relaunches.
 const PREFS_PATH = path.join(app.getPath('userData'), 'prefs.json');
@@ -304,10 +293,6 @@ function createMainWindow(display) {
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      // Never throttle this renderer's timers/audio when Chromium deems the
-      // window occluded — the wake-word VAD and TTS playback run here, and
-      // throttling after idle is one of the "stutters when cold" causes.
-      backgroundThrottling: false,
     },
   });
 
@@ -367,35 +352,11 @@ ipcMain.on('chat-send', async (event, text) => {
     }
     return;
   }
-  // Voice (Phase 1): if enabled, tap the streaming chunks and speak them sentence
-  // by sentence via Kokoro. Barge-in: cut any audio still playing from a prior turn.
-  const voiceOn = !!prefs.voiceReplies;
-  try { require('./voice/log').vlog('turn', `start: voiceReplies=${voiceOn} voice=${prefs.voiceName || 'af_bella'}`); } catch (_) {}
-  let speaker = null;
-  if (voiceOn) {
-    if (!event.sender.isDestroyed()) event.sender.send('clawd-tts-stop');
-    // Warm the ElevenLabs TLS connection (no-op on the local voice) while
-    // Claude writes the first sentence — kills the cold-start gap after idle.
-    voiceTts.preconnect();
-    const send = (channel, payload) => {
-      if (!event.sender.isDestroyed()) event.sender.send(channel, payload);
-    };
-    speaker = voicePipeline.createSpeaker(send, () => event.sender.isDestroyed());
-  }
-  const tTurn0 = Date.now();
-  let tFirstChunk = 0;
   try {
     for await (const piece of agent.chat(text)) {
       if (event.sender.isDestroyed()) break;
-      if (!tFirstChunk && piece.type === 'chunk') tFirstChunk = Date.now();
       event.sender.send('chat-piece', piece);
-      if (speaker && piece.type === 'chunk' && piece.text) speaker.push(piece.text);
     }
-    if (speaker) await speaker.end();
-    try {
-      const ft = tFirstChunk ? ((tFirstChunk - tTurn0) / 1000).toFixed(2) + 's' : 'n/a';
-      require('./voice/log').vlog('turn', `first-token ${ft} · total ${((Date.now() - tTurn0) / 1000).toFixed(2)}s`);
-    } catch (_) {}
   } catch (err) {
     if (!event.sender.isDestroyed()) {
       event.sender.send('chat-piece', { type: 'error', error: err.message || String(err) });
@@ -405,78 +366,6 @@ ipcMain.on('chat-send', async (event, text) => {
 });
 
 ipcMain.on('chat-reset', () => { agent.reset(); agent.warm().catch(() => {}); });
-
-// ---- Voice input (Phase 2) ----
-// Triggered by the MIC BUTTON in the chat panel (no global keyboard shortcut —
-// the click-through window can't reliably own a hotkey and combos collide). The
-// renderer captures the mic, sends the audio to stt:transcribe, and submits the
-// transcript as a chat turn.
-
-// Renderer hands us mono 16kHz Float32 audio → Moonshine (utilityProcess) → text.
-ipcMain.handle('stt:transcribe', async (_e, samples) => {
-  try {
-    return { text: await voiceStt.transcribe(samples) };
-  } catch (err) {
-    return { error: err && err.message ? err.message : String(err) };
-  }
-});
-
-// Warm the STT worker/model ahead of the first transcription (first-ever use
-// downloads ~250MB) so the wait happens while the user is still speaking.
-ipcMain.handle('stt:warm', async () => {
-  try { await voiceStt.ensureStt(); return { ok: true }; }
-  catch (err) { return { ok: false, error: err && err.message ? err.message : String(err) }; }
-});
-
-// Trigger the macOS mic permission prompt (renderer getUserMedia alone won't).
-// On a prior denial macOS won't re-prompt — open System Settings to the mic pane
-// so the user can flip it without hunting.
-ipcMain.handle('mic:request', async () => {
-  if (process.platform !== 'darwin') return 'granted';
-  const status = systemPreferences.getMediaAccessStatus('microphone');
-  if (status === 'granted') return 'granted';
-  if (status === 'not-determined') {
-    const ok = await systemPreferences.askForMediaAccess('microphone');
-    return ok ? 'granted' : 'denied';
-  }
-  // 'denied' | 'restricted' — can't re-prompt; send them to the right pane.
-  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
-  return status;
-});
-
-// ---- Hands-free wake word (Phase 3) ----
-// Always-on mic that wakes on "clawd" / "hey clawd". Opt-in, off by default.
-function sendHandsFree(on) {
-  if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('clawd-hands-free', { on });
-}
-
-// ---- Voice keep-warm ----
-// After a stretch of idle, macOS App Naps the process and pages out the speech
-// models (~300MB Kokoro + ~400MB Moonshine); the first interaction then pays
-// page-in + throttle costs and the reply audio stutters. While any voice
-// feature is on: hold an app-suspension blocker and tickle each loaded model
-// every few minutes so its pages stay resident. Both no-ops when voice is off.
-let keepWarmTimer = null;
-let psbId = null;
-function refreshVoiceKeepWarm() {
-  const active = !!(prefs.voiceReplies || prefs.handsFree);
-  if (active && psbId === null) psbId = powerSaveBlocker.start('prevent-app-suspension');
-  if (!active && psbId !== null) {
-    powerSaveBlocker.stop(psbId);
-    psbId = null;
-  }
-  if (active && !keepWarmTimer) {
-    keepWarmTimer = setInterval(() => {
-      try { require('./voice/log').vlog('warm', 'tick'); } catch (_) {}
-      if (prefs.handsFree) voiceStt.keepWarm().catch(() => {});
-      if (prefs.voiceReplies) voiceTts.keepWarm().catch(() => {});
-    }, 2 * 60_000);
-  }
-  if (!active && keepWarmTimer) {
-    clearInterval(keepWarmTimer);
-    keepWarmTimer = null;
-  }
-}
 
 // Preferences window IPC.
 ipcMain.handle('prefs:get', () => ({ ...prefs }));
@@ -494,8 +383,6 @@ ipcMain.on('prefs:set', (_e, updates) => {
     agent.reset();
     agent.warm().catch(() => {});
   }
-  // Adding/removing an ElevenLabs key changes the Voice submenu's entries.
-  if (updates && 'elevenLabsKey' in updates) rebuildTrayMenu();
 });
 
 let prefsWin = null;
@@ -579,36 +466,6 @@ function buildSizeSubmenu() {
     type: 'radio',
     checked: scale === cur,
     click: () => setScale(scale),
-  }));
-}
-
-// Voice choices (speeds/IDs are baked into voice/tts.js). The ElevenLabs pair
-// only shows when the user has pasted an API key in Preferences. Switching is
-// live — a prefs write tts.js picks up on the next spoken sentence.
-function voiceChoices() {
-  const choices = [];
-  if (prefs.elevenLabsKey && prefs.elevenLabsKey.trim()) {
-    choices.push(['el_rachel', 'Rachel — ElevenLabs'], ['el_josh', 'Josh — ElevenLabs']);
-  }
-  choices.push(['af_bella', 'Bella — built-in'], ['am_puck', 'Puck — built-in']);
-  return choices;
-}
-function currentVoice() {
-  const choices = voiceChoices();
-  if (choices.some(([id]) => id === prefs.voiceName)) return prefs.voiceName;
-  return choices[0][0]; // EL key present → Rachel; otherwise Bella
-}
-function buildVoiceSubmenu() {
-  return voiceChoices().map(([id, label]) => ({
-    label,
-    type: 'radio',
-    checked: currentVoice() === id,
-    click: () => {
-      prefs.voiceName = id;
-      savePrefs(prefs);
-      voiceTts.ensureTts().catch(() => {}); // warm kokoro (also the EL fallback)
-      rebuildTrayMenu();
-    },
   }));
 }
 
@@ -729,43 +586,6 @@ function buildTrayMenuTemplate() {
     { label: 'About Clawd', click: showAbout },
     { type: 'separator' },
     { label: 'Reset conversation', click: () => { agent.reset(); agent.warm().catch(() => {}); } },
-    {
-      label: 'Speak replies',
-      type: 'checkbox',
-      checked: !!prefs.voiceReplies,
-      click: (item) => {
-        prefs.voiceReplies = item.checked;
-        savePrefs(prefs);
-        // Warm the model now (first load is ~13s + a one-time ~90MB download) so
-        // the first spoken reply isn't delayed by the cold start.
-        if (item.checked) voiceTts.ensureTts().catch(() => {});
-        refreshVoiceKeepWarm();
-        rebuildTrayMenu();
-      },
-    },
-    { label: 'Voice', submenu: buildVoiceSubmenu(), enabled: !!prefs.voiceReplies },
-    {
-      label: "Hands-free (say 'clawd')",
-      type: 'checkbox',
-      checked: !!prefs.handsFree,
-      click: async (item) => {
-        prefs.handsFree = item.checked;
-        savePrefs(prefs);
-        if (item.checked) {
-          try {
-            if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') {
-              await systemPreferences.askForMediaAccess('microphone');
-            }
-          } catch (_) {}
-          voiceStt.ensureStt().catch(() => {});
-          sendHandsFree(true);
-        } else {
-          sendHandsFree(false);
-        }
-        refreshVoiceKeepWarm();
-        rebuildTrayMenu();
-      },
-    },
     { label: 'Size', submenu: buildSizeSubmenu() },
     {
       label: 'Move to monitor',
@@ -832,9 +652,6 @@ function watchDisplayChanges() {
 
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
-  // Allow the renderer's getUserMedia mic request (the OS still gates it via TCC).
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media'));
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
   maybeShowClaudeOnboarding();
   createMainWindow(screen.getPrimaryDisplay());
   createTray();
@@ -843,12 +660,6 @@ app.whenReady().then(() => {
   startIdleChatter();
   // Pre-spawn the Claude session so the first message isn't cold (~1-3s saved).
   agent.warm().catch(() => {});
-  // Re-arm hands-free if the user left it on (after the renderer has loaded).
-  if (prefs.handsFree) {
-    voiceStt.ensureStt().catch(() => {});
-    mainWin.webContents.once('did-finish-load', () => sendHandsFree(true));
-  }
-  refreshVoiceKeepWarm();
 });
 
 app.on('window-all-closed', () => {

@@ -450,8 +450,6 @@ let isHovered = false;        // cursor over the crab
 let isListening = false;       // waiting for chat reply
 let listeningStartAt = 0;
 let danceUntil = 0;            // music playing → bounce to beat
-let isSpeaking = false;        // TTS audio playing → mouth-along bob
-let speakingLevel = 0;         // 0..1 live amplitude of Clawd's own voice
 
 function setListening(on) {
   isListening = !!on;
@@ -460,13 +458,6 @@ function setListening(on) {
 function startDancing(durationMs) {
   danceUntil = performance.now() + (durationMs || 30000);
 }
-function setSpeaking(on) {
-  isSpeaking = !!on;
-  if (!on) speakingLevel = 0;
-}
-function setSpeakingLevel(level) {
-  speakingLevel = Math.max(0, Math.min(1, level || 0));
-}
 
 // Jump reaction — main process pushes a "clawd-react" IPC when frontmost app
 // changes (and could push other events later).
@@ -474,13 +465,6 @@ const REACT_DURATION = 700;
 let reactStartAt = null;
 function triggerReact() {
   reactStartAt = performance.now();
-}
-// Woke up from a hands-free "clawd" — a hop plus a brief listening sway so it's
-// clear he heard the wake word.
-function wakePerk() {
-  triggerReact();
-  setListening(true);
-  setTimeout(() => setListening(false), 1500);
 }
 if (window.crabAPI && window.crabAPI.onReact) {
   window.crabAPI.onReact(() => triggerReact());
@@ -492,20 +476,6 @@ let activeThought = null; // { text, startedAt, duration }
 
 function showThought(text, durationMs) {
   activeThought = { text, startedAt: performance.now(), duration: durationMs || 4500 };
-}
-
-// Update the live bubble's text WITHOUT resetting its clock — used for streaming
-// voice replies into the bubble chunk by chunk (resetting startedAt each chunk
-// would replay the fade-in and flicker). Extends the deadline so the bubble
-// never starts fading mid-stream.
-function updateThought(text, durationMs) {
-  if (!activeThought) {
-    showThought(text, durationMs);
-    return;
-  }
-  activeThought.text = text;
-  const age = performance.now() - activeThought.startedAt;
-  activeThought.duration = Math.max(activeThought.duration, age + (durationMs || 4500));
 }
 
 // Idle thought timing — random interval between 6 and 16 minutes when Clawd
@@ -702,14 +672,6 @@ function draw() {
     danceY = Math.sin(tNow / 1000 * 2 * Math.PI * 2) * 2.5; // 2 Hz bounce
   }
 
-  // SPEAKING: bob amplitude tracks Clawd's live voice level so he visibly mouths
-  // along to what he's saying. A small base bob + amplitude-scaled lift.
-  let speakY = 0;
-  if (isSpeaking) {
-    const tSec = tNow / 1000;
-    speakY = -(0.8 + speakingLevel * 4) * (0.6 + 0.4 * Math.abs(Math.sin(tSec * 12)));
-  }
-
   // NAP: body sinks 1-2 px (resting on the floor) with a slow breathing bob.
   let napY = 0;
   if (behaviorState === ST.NAP) {
@@ -733,7 +695,7 @@ function draw() {
   }
 
   const drawX = bbox.x + Math.round(swayX);
-  const drawY = bbox.y + bob + Math.round(reactY + stretchY + hoverY + danceY + speakY + napY + burrowY);
+  const drawY = bbox.y + bob + Math.round(reactY + stretchY + hoverY + danceY + napY + burrowY);
   const frame = moving ? walkFrame : 0;
   // Force eyes closed while sleeping OR napping (overrides blink scheduler).
   const eyesShown = !(eyesClosed || isSleeping || behaviorState === ST.NAP);
@@ -804,33 +766,12 @@ function draw() {
       const fontSize = Math.max(10, SCALE + 4);
       ctx.font = `${fontSize}px ui-monospace, Menlo, monospace`;
       const padding = 6;
-      // Word-wrap into lines (voice replies stream whole sentences into the
-      // bubble — a single line would blow out the canvas width). When the text
-      // overflows the cap, keep the LAST lines so it reads like live captions.
-      const maxTextW = Math.min(300, canvas.width - 28);
-      const MAX_LINES = 5;
-      const words = activeThought.text.split(/\s+/).filter(Boolean);
-      let lines = [];
-      let cur = '';
-      for (const word of words) {
-        const tryLine = cur ? cur + ' ' + word : word;
-        if (cur && ctx.measureText(tryLine).width > maxTextW) {
-          lines.push(cur);
-          cur = word;
-        } else {
-          cur = tryLine;
-        }
-      }
-      if (cur) lines.push(cur);
-      if (lines.length === 0) lines = [''];
-      if (lines.length > MAX_LINES) lines = lines.slice(lines.length - MAX_LINES);
-      const lineH = fontSize + 4;
-      let textW = 0;
-      for (const l of lines) textW = Math.max(textW, ctx.measureText(l).width);
-      const w = Math.ceil(Math.min(maxTextW, textW)) + padding * 2;
-      const h = lines.length * lineH + padding * 2;
+      const text = activeThought.text;
+      const metrics = ctx.measureText(text);
+      const w = Math.ceil(metrics.width) + padding * 2;
+      const h = Math.ceil(fontSize) + padding * 2;
       let bubbleX = bbox.x + bbox.w / 2 - w / 2;
-      const bubbleY = Math.max(4, bbox.y - h - 8);
+      const bubbleY = bbox.y - h - 8;
       // Keep within canvas horizontally.
       if (bubbleX < 4) bubbleX = 4;
       if (bubbleX + w > canvas.width - 4) bubbleX = canvas.width - w - 4;
@@ -855,9 +796,7 @@ function draw() {
       ctx.fillStyle = '#000';
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
-      for (let li = 0; li < lines.length; li++) {
-        ctx.fillText(lines[li], bubbleX + padding, bubbleY + padding + li * lineH + lineH / 2);
-      }
+      ctx.fillText(text, bubbleX + padding, bubbleY + h / 2);
       ctx.globalAlpha = 1;
     }
   }
@@ -1110,11 +1049,6 @@ window.Crab = {
   clearAccessory,
   setListening,
   dance: startDancing,
-  setSpeaking,
-  setSpeakingLevel,
-  wakePerk,
-  think: showThought,
-  thinkUpdate: updateThought,
   isOnboarding: () => onboardingActive,
   endOnboarding: () => { onboardingActive = false; },
 };

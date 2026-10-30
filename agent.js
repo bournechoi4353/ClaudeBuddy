@@ -245,8 +245,8 @@ async function startSession() {
     // Latency: don't ship the built-in Claude Code toolset's schemas (Bash/Read/
     // Edit/...) every turn — Clawd only uses its own MCP tools.
     tools: [],
-    // Latency: replies are 1-2 spoken-style sentences; extended thinking only
-    // delays the first token (and therefore first audio).
+    // Latency: replies are 1-2 short sentences; extended thinking only delays
+    // the first token.
     thinking: { type: 'disabled' },
     includePartialMessages: true,
     model: 'claude-sonnet-4-6',
@@ -256,7 +256,6 @@ async function startSession() {
 
   const q = loadedSdk.query({ prompt: input, options });
   alive = true;
-  try { require('./voice/log').vlog('agent', 'session spawned'); } catch (_) {}
   void consume(q);
 }
 
@@ -289,7 +288,6 @@ async function consume(q) {
   } finally {
     alive = false;
     input = null;
-    try { require('./voice/log').vlog('agent', 'session ended'); } catch (_) {}
   }
 }
 
