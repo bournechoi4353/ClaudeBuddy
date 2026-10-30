@@ -9,7 +9,8 @@ const START = new Date(2026, 5, 1, 14, 0, 0).getTime();
 function fixture() {
   // idle 30 s means present but not typing, so ambient signals settle on 'greeting'.
   const state = { t: START, idle: 30, fullscreen: false, music: 'none' };
-  const emitted = [];
+  const emitted = []; // bubbles only
+  const all = [];     // every message sent to the renderer
   let n = 0;
   const controller = createPetController({
     now: () => state.t,
@@ -19,13 +20,16 @@ function fixture() {
       getMusicState: async () => state.music,
     },
     powerMonitor: { getSystemIdleTime: () => state.idle },
-    emit: (channel, payload) => emitted.push({ channel, ...payload }),
+    emit: (channel, payload) => {
+      all.push({ channel, ...payload });
+      if (channel === 'pet-brain-bubble') emitted.push({ channel, ...payload });
+    },
     createBrain: () => ({
       react: async (signals) => { n += 1; return { reaction: reactionFor(signals), line: `line ${n}`, source: 'canned' }; },
     }),
   });
   const advance = (ms) => { state.t += ms; };
-  return { controller, state, emitted, advance };
+  return { controller, state, emitted, all, advance };
 }
 
 test('nothing is shown during the startup quiet period', async () => {
@@ -137,4 +141,38 @@ test('a throwing platform or power monitor never breaks sampling', async () => {
   assert.doesNotThrow(() => controller.sample());
   const decision = await controller.evaluate();
   assert.strictEqual(decision.ok, true);
+});
+
+test('the sprite pose follows the live reaction, with a minimum dwell between changes', async () => {
+  const { controller, state, all, advance } = fixture();
+  advance(REACTION_CONFIG.startupQuietMs + 1000);
+  controller.sample();
+  await controller.evaluate();
+  const states = () => all.filter((e) => e.channel === 'pet-brain-state').map((e) => e.reaction);
+  assert.deepStrictEqual(states(), ['greeting']);
+
+  // The situation changes right away: still inside the dwell, so the pose holds.
+  state.idle = 120;
+  advance(2000);
+  controller.sample();
+  await controller.evaluate();
+  assert.deepStrictEqual(states(), ['greeting']);
+
+  // After the dwell the pose follows.
+  advance(10 * 1000);
+  controller.sample();
+  await controller.evaluate();
+  assert.deepStrictEqual(states(), ['greeting', 'short_idle']);
+});
+
+test('an event changes the sprite pose immediately, ignoring the dwell', async () => {
+  const { controller, all, advance } = fixture();
+  advance(REACTION_CONFIG.startupQuietMs + 1000);
+  controller.sample();
+  await controller.evaluate();
+  advance(1000);
+  controller.pushEvent('build_failed');
+  await controller.evaluate();
+  const states = all.filter((e) => e.channel === 'pet-brain-state').map((e) => e.reaction);
+  assert.deepStrictEqual(states, ['greeting', 'stuck']);
 });

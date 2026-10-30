@@ -18,6 +18,16 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onNotify: (callback) => {
     ipcRenderer.on('clawd-notify', (_e, info) => callback(info));
   },
+  // Pet brain (only fires when PET_BRAIN_LOCAL=1).
+  onPetState: (callback) => {
+    ipcRenderer.on('pet-brain-state', (_e, info) => callback(info));
+  },
+  onPetBubble: (callback) => {
+    ipcRenderer.on('pet-brain-bubble', (_e, info) => callback(info));
+  },
+  onPetDebug: (callback) => {
+    ipcRenderer.on('pet-brain-debug', (_e, info) => callback(info));
+  },
   getPrefs: () => ipcRenderer.invoke('prefs:get'),
   setPref: (updates) => ipcRenderer.send('prefs:set', updates),
   onPrefsUpdated: (callback) => {

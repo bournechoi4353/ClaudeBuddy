@@ -51,11 +51,26 @@ const rows = CRAB.length;
 let crabW = cols * SCALE;
 let crabH = rows * SCALE;
 
+// The pet brain's raincloud (renderer/petSprite.js) is square and sized differently from
+// the crab. When it is wanted, the pet's bounding box follows it. Otherwise this is the
+// crab's size, exactly as before.
+function petSpriteWanted() {
+  return !!(window.PetSprite && window.PetSprite.wanted);
+}
+function recomputeSize() {
+  if (petSpriteWanted()) {
+    crabW = crabH = window.PetSprite.sizeFor(SCALE);
+  } else {
+    crabW = cols * SCALE;
+    crabH = rows * SCALE;
+  }
+}
+recomputeSize();
+
 function applyScale(newScale) {
   if (typeof newScale !== 'number' || newScale < 1) return;
   SCALE = newScale;
-  crabW = cols * SCALE;
-  crabH = rows * SCALE;
+  recomputeSize();
   if (posX + crabW > canvas.width) posX = Math.max(0, canvas.width - crabW);
   if (posX < 0) posX = 0;
 }
@@ -699,7 +714,7 @@ function draw() {
   const frame = moving ? walkFrame : 0;
   // Force eyes closed while sleeping OR napping (overrides blink scheduler).
   const eyesShown = !(eyesClosed || isSleeping || behaviorState === ST.NAP);
-  const maxRow = rows - burrowRowsToHide;
+  const maxRow = petSpriteWanted() ? 0 : rows - burrowRowsToHide;
 
   for (let r = 0; r < maxRow; r++) {
     for (let c = 0; c < cols; c++) {
@@ -714,7 +729,7 @@ function draw() {
     }
   }
 
-  if (!eyesShown) {
+  if (!eyesShown && !petSpriteWanted()) {
     ctx.fillStyle = COLORS.X;
     for (let c = 0; c < cols; c++) {
       if (CRAB[1][c] === 'X') {
@@ -730,7 +745,7 @@ function draw() {
 
   // Permanent skin accessory (e.g., royal skin's crown). Drawn first so the
   // temporary tool-use accessory (glasses while reading) sits on top if both apply.
-  if (currentSkinAccessory) {
+  if (currentSkinAccessory && !petSpriteWanted()) {
     const cells = ACCESSORY_CELLS[currentSkinAccessory];
     if (cells) {
       ctx.fillStyle = currentSkinAccessoryColor || COLORS.X;
@@ -741,7 +756,7 @@ function draw() {
   }
 
   // Temporary accessory triggered by tool use (glasses, headphones, etc.).
-  if (accessory && performance.now() < accessoryUntil) {
+  if (accessory && performance.now() < accessoryUntil && !petSpriteWanted()) {
     const cells = ACCESSORY_CELLS[accessory];
     if (cells) {
       ctx.fillStyle = COLORS.X;
@@ -752,6 +767,8 @@ function draw() {
   } else if (accessory) {
     accessory = null;
   }
+
+  if (petSpriteWanted()) window.PetSprite.draw(ctx, drawX, drawY, SCALE, { sleeping: isSleeping });
 
   // Z's float on top of everything (drawn last so they're visible even over the body).
   drawZParticles();
@@ -1049,6 +1066,8 @@ window.Crab = {
   clearAccessory,
   setListening,
   dance: startDancing,
+  showThought,
+  refreshSize: recomputeSize,
   isOnboarding: () => onboardingActive,
   endOnboarding: () => { onboardingActive = false; },
 };

@@ -280,6 +280,7 @@ let currentDisplayId = null;
 
 // ---- Pet brain (off unless PET_BRAIN_LOCAL=1) ----
 let petController = null;
+let petPoseCycle = false;
 function startPetBrain() {
   if (petController) return;
   const { createPetController } = require('./pet/controller');
@@ -319,7 +320,7 @@ function createMainWindow(display) {
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setIgnoreMouseEvents(true, { forward: true });
   mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
-    search: `scale=${currentScale()}`,
+    search: `scale=${currentScale()}${petBrainActive(prefs) ? '&petbrain=1' : ''}`,
   });
 
   startAppSwitchWatcher(mainWin);
@@ -606,6 +607,17 @@ function buildTrayMenuTemplate() {
     { label: 'About Clawd', click: showAbout },
     { type: 'separator' },
     { label: 'Reset conversation', click: () => { agent.reset(); agent.warm().catch(() => {}); } },
+    // Hidden debug item: only present while the pet brain is active.
+    ...(petBrainActive(prefs) ? [{
+      label: 'Pet brain: cycle all poses',
+      type: 'checkbox',
+      checked: petPoseCycle,
+      click: (item) => {
+        petPoseCycle = item.checked;
+        if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('pet-brain-debug', { cycle: petPoseCycle });
+        rebuildTrayMenu();
+      },
+    }] : []),
     { label: 'Size', submenu: buildSizeSubmenu() },
     {
       label: 'Move to monitor',

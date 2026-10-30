@@ -9,10 +9,12 @@ const { createEventLayer } = require('./events');
 const { createReactionLayer } = require('./reactions');
 const { petBrainDebug } = require('./flag');
 const { createPetBrain } = require('../vendor/pet-brain/petBrain.js');
+const { reactionFor } = require('../vendor/pet-brain/rules.js');
 
 const SAMPLE_MS = 1000;      // idle time and activity share
 const MUSIC_MS = 20 * 1000;  // music state, so Spotify is not asked every second
 const EVALUATE_MS = 5 * 1000; // how often to ask whether a bubble is due
+const STATE_DWELL_MS = 10 * 1000; // the sprite pose changes at most this often, except for events
 
 // Outcomes where the pending event should stay queued and try again on the next evaluation.
 const RETRY_REASONS = new Set(['startup-quiet', 'global-gap', 'fullscreen', 'busy', 'error']);
@@ -45,6 +47,8 @@ function createPetController(deps) {
   let music = 'none';
   let evaluating = false;
   let timers = [];
+  let lastLive = null;      // reaction the sprite pose last followed
+  let lastLiveAt = -Infinity;
 
   function sample() {
     let idleSec = 0;
@@ -63,6 +67,15 @@ function createPetController(deps) {
     try {
       const at = now();
       const signals = events.read(at, { consume: false });
+
+      // Keep the sprite pose in step with what the rules see, without flicker.
+      const live = reactionFor(signals);
+      if (live !== lastLive && (signals.event !== 'none' || at - lastLiveAt >= STATE_DWELL_MS)) {
+        lastLive = live;
+        lastLiveAt = at;
+        emit('pet-brain-state', { reaction: live });
+      }
+
       const decision = await reactions.consider(signals);
       if (!RETRY_REASONS.has(decision.reason)) events.read(at); // the event was dealt with: consume it
       if (decision.ok) {
