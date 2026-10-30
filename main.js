@@ -42,6 +42,9 @@ const tools = require('./tools');
 const platform = require('./platform');
 const { dialog, shell } = require('electron');
 const os = require('os');
+// Pet brain (ml-pet-brain branch): only the flag helper is loaded here. The brain itself
+// is required lazily and only when PET_BRAIN_LOCAL=1, so flag-off startup is unchanged.
+const { petBrainActive } = require('./pet/flag');
 
 // When a timer ends, the renderer hops Clawd + shows a thought bubble.
 tools.setTimerEndCallback(({ id, label }) => {
@@ -275,6 +278,22 @@ function maybeShowClaudeOnboarding() {
 let mainWin = null;
 let currentDisplayId = null;
 
+// ---- Pet brain (off unless PET_BRAIN_LOCAL=1) ----
+let petController = null;
+function startPetBrain() {
+  if (petController) return;
+  const { createPetController } = require('./pet/controller');
+  petController = createPetController({
+    platform,
+    powerMonitor: require('electron').powerMonitor,
+    getPrefs: () => prefs,
+    emit: (channel, payload) => {
+      if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, payload);
+    },
+  });
+  petController.start();
+}
+
 function createMainWindow(display) {
   const wa = display.workArea;
   currentDisplayId = display.id;
@@ -435,6 +454,7 @@ function startAppSwitchWatcher(win) {
         lastReactionAt = now;
       }
       lastFront = front;
+      if (petController) petController.noteFrontApp(front);
     } catch (_) {
       // ignore — Clawd just won't react this tick
     }
@@ -658,8 +678,13 @@ app.whenReady().then(() => {
   watchDisplayChanges();
   startProactiveMonitor();
   startIdleChatter();
+  if (petBrainActive(prefs)) startPetBrain();
   // Pre-spawn the Claude session so the first message isn't cold (~1-3s saved).
   agent.warm().catch(() => {});
+});
+
+app.on('before-quit', () => {
+  if (petController) petController.dispose();
 });
 
 app.on('window-all-closed', () => {

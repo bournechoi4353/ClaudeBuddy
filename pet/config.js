@@ -32,4 +32,45 @@ const EVENT_CONFIG = Object.freeze({
   eventTtlMs: 60 * 1000,
 });
 
-module.exports = { MIN, HOUR, EVENT_CONFIG };
+// ---- Reaction layer (pet/reactions.js) ----
+
+const REACTION_CONFIG = Object.freeze({
+  // No bubbles this soon after launch, so the pet does not ambush the user.
+  startupQuietMs: 30 * 1000,
+  // Minimum time between any two bubbles, whatever the reaction.
+  globalMinGapMs: 2 * MIN,
+  // Used for a reaction with no entry below.
+  defaultCooldownMs: 30 * MIN,
+  // Minimum time before the same reaction can show a bubble again.
+  cooldownMs: Object.freeze({
+    stuck: 5 * MIN,
+    celebrate: 5 * MIN,
+    error_spotted: 5 * MIN,
+    welcome_back: 10 * MIN,
+    new_song: 10 * MIN,
+    fast_context_switching: 20 * MIN,
+    short_idle: 20 * MIN,
+    music_paused: 30 * MIN,
+    reading_docs: 30 * MIN,
+    fast_typing: 30 * MIN,
+    focused: 45 * MIN,
+    music_vibe: 45 * MIN,
+    chat_chatter: 45 * MIN,
+    game_time: 60 * MIN,
+    video_watching: 60 * MIN,
+    late_night: 60 * MIN,
+    long_idle: 60 * MIN,
+    break_suggestion: 60 * MIN,
+    hydrate_nudge: 60 * MIN,
+    deep_work_streak: 90 * MIN,
+    greeting: 3 * HOUR,
+    lunch_break: 3 * HOUR,
+    goodnight: 4 * HOUR,
+    morning_start: 6 * HOUR,
+  }),
+  // Chattiness multiplies every cooldown and the global gap. Higher means quieter.
+  chattiness: Object.freeze({ low: 2, normal: 1, high: 0.5 }),
+  defaultChattiness: 'normal',
+});
+
+module.exports = { MIN, HOUR, EVENT_CONFIG, REACTION_CONFIG };

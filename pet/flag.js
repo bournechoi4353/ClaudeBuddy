@@ -17,4 +17,9 @@ function petBrainActive(prefs, env = process.env) {
   return !(prefs && prefs.petBrainEnabled === false);
 }
 
-module.exports = { petBrainGate, petBrainActive };
+/** True when PET_BRAIN_DEBUG=1, which turns on console logging of reactions. */
+function petBrainDebug(env = process.env) {
+  return !!env && env.PET_BRAIN_DEBUG === '1';
+}
+
+module.exports = { petBrainGate, petBrainActive, petBrainDebug };
