@@ -201,3 +201,62 @@ test('weather stays off until configured, then reports poses to the renderer', a
   assert.deepStrictEqual(emitted.filter((e) => e.channel === 'pet-brain-weather').map((e) => e.pose), ['wx_rain', null]);
   await controller.dispose();
 });
+
+test('smart lines through the controller: built-in first, then the model, with status and logging', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'petctl-')), 'm.gguf');
+  fs.writeFileSync(file, 'x');
+
+  const prefs = { petSmartLines: true, petModelPath: file };
+  const logs = [];
+  const bubbles = [];
+  const workers = [];
+  const clock = { t: START };
+  const controller = createPetController({
+    now: () => clock.t,
+    env: { PET_BRAIN_DEBUG: '1' },
+    getPrefs: () => prefs,
+    platform: { isFrontmostFullscreen: async () => false, getMusicState: async () => 'none' },
+    powerMonitor: { getSystemIdleTime: () => 30 },
+    emit: (channel, payload) => { if (channel === 'pet-brain-bubble') bubbles.push(payload); },
+    verifyModel: async () => ({ ok: true }),
+    createWorkerBackend: () => {
+      const w = { start: async () => true, generate: async () => "Steady progress. I'll try to stay out of the way.", dispose: async () => { w.disposed = true; } };
+      workers.push(w);
+      return w;
+    },
+  });
+  const realLog = console.log;
+  console.log = (line) => logs.push(String(line));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.match(controller.modelStatus().line, /idle/);
+
+    clock.t += REACTION_CONFIG.startupQuietMs + 1000;
+    controller.sample();
+    await controller.evaluate();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(bubbles[0].source, 'canned', 'the first line is built in');
+    assert.ok(logs.some((l) => /source=canned .*fallback=cold-start/.test(l)), 'the log says why');
+    assert.match(controller.modelStatus().line, /loaded/);
+
+    controller.resetTimers();
+    clock.t += REACTION_CONFIG.globalMinGapMs + 1000;
+    await controller.evaluate();
+    assert.strictEqual(bubbles[1].source, 'model');
+    assert.ok(logs.some((l) => /source=model ms=\d+$/.test(l)), 'the log has the latency and no fallback');
+    assert.match(controller.modelStatus().line, /Last line: \d+ ms/);
+
+    prefs.petSmartLines = false;
+    controller.configureModel();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(workers[0].disposed, true, 'turning it off unloads the model');
+    assert.match(controller.modelStatus().line, /Smart lines are off/);
+  } finally {
+    console.log = realLog;
+    await controller.dispose();
+  }
+});

@@ -44,3 +44,18 @@ test('a weather place is rounded to 2 decimals and validated', () => {
   assert.strictEqual(sanitizePetUpdates({ petWeatherPlace: null }).petWeatherPlace, null, 'clearing is allowed');
   assert.strictEqual(cleanPlace({ latitude: 1, longitude: 2, label: 'x'.repeat(500) }).label.length, 100);
 });
+
+test('smart lines is a strict boolean and off unless true', () => {
+  assert.strictEqual(sanitizePetUpdates({ petSmartLines: true }).petSmartLines, true);
+  assert.strictEqual(sanitizePetUpdates({ petSmartLines: false }).petSmartLines, false);
+  assert.strictEqual(sanitizePetUpdates({ petSmartLines: 'on' }).petSmartLines, false);
+  assert.strictEqual(sanitizePetUpdates({ petSmartLines: 1 }).petSmartLines, false);
+});
+
+test('the model path is a trimmed string of sane length, or dropped', () => {
+  assert.strictEqual(sanitizePetUpdates({ petModelPath: '  /models/pet.gguf  ' }).petModelPath, '/models/pet.gguf');
+  assert.strictEqual(sanitizePetUpdates({ petModelPath: '' }).petModelPath, '', 'empty goes back to the default location');
+  for (const bad of [42, null, {}, ['/a'], 'x'.repeat(1025)]) {
+    assert.ok(!('petModelPath' in sanitizePetUpdates({ petModelPath: bad })), JSON.stringify(bad).slice(0, 30));
+  }
+});

@@ -167,6 +167,18 @@
       <span class="hint" id="petResetNote" style="margin-top:0"></span>
     </div>
 
+    <label class="field" for="petSmart">Smart lines</label>
+    <select id="petSmart">
+      <option value="off">Off: built-in lines only</option>
+      <option value="on">On: local model, built-in lines as backup</option>
+    </select>
+    <div class="hint">A small language model on this Mac writes the line instead of picking one from the built-in set. It runs here and nothing leaves this machine. It uses about 1.5 GB of memory while loaded and unloads after 10 minutes without a line. The first line after it loads or unloads still comes from the built-in set.</div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="petModelPath" placeholder="default location" maxlength="1024" style="flex:1">
+      <button type="button" id="petModelBrowse">Browse</button>
+    </div>
+    <div class="hint" id="petModelStatus"></div>
+
     <label class="check"><input type="checkbox" id="petWeatherOn"> Weather mood</label>
     <div class="hint">Off by default. When on, the pet sends only a rounded latitude and longitude (about 1 km) to Open-Meteo.com every 15 minutes or more, with no account or identifier, so the cloud can match the weather when it is idle. Like any web request, it reveals your IP address to them. Typing a city sends that name to Open-Meteo once, when you press Find.</div>
     <div id="petWeatherBox" hidden>

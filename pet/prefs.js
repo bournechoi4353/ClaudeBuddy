@@ -28,6 +28,12 @@ function sanitizePetUpdates(updates) {
   if ('petBrainEnabled' in out) out.petBrainEnabled = out.petBrainEnabled === true;
   if ('petChattiness' in out && !CHATTINESS_LEVELS.includes(out.petChattiness)) delete out.petChattiness;
   if ('petWeatherEnabled' in out) out.petWeatherEnabled = out.petWeatherEnabled === true;
+  if ('petSmartLines' in out) out.petSmartLines = out.petSmartLines === true;
+  if ('petModelPath' in out) {
+    // A file path, or '' to go back to the default location. Anything else is dropped.
+    if (typeof out.petModelPath === 'string' && out.petModelPath.length <= 1024) out.petModelPath = out.petModelPath.trim();
+    else delete out.petModelPath;
+  }
   if ('petWeatherPlace' in out) {
     if (out.petWeatherPlace === null) {
       out.petWeatherPlace = null; // clearing the place is allowed

@@ -73,4 +73,21 @@ const REACTION_CONFIG = Object.freeze({
   defaultChattiness: 'normal',
 });
 
-module.exports = { MIN, HOUR, EVENT_CONFIG, REACTION_CONFIG };
+// ---- Smart lines: the local model (pet/modelService.js) ----
+
+const MODEL_CONFIG = Object.freeze({
+  // Unload the model after this long without writing a line. It frees about 1.4 GB.
+  idleUnloadMs: 10 * MIN,
+  // petBrain gives the model this long to answer a line, then uses a built-in line instead.
+  timeoutMs: 1500,
+  // 'cpu' or 'metal'. macOS has no CPU-only prebuilt binary, so 'cpu' there means the Metal
+  // binary with zero GPU layers. See docs/PET_BRAIN.md, "Smart lines".
+  gpu: 'cpu',
+  threads: 4,
+  // After a failed load, wait this long before trying again.
+  loadRetryMs: 5 * MIN,
+  // Give up on a load that has not finished by now.
+  startupTimeoutMs: 60 * 1000,
+});
+
+module.exports = { MIN, HOUR, EVENT_CONFIG, REACTION_CONFIG, MODEL_CONFIG };

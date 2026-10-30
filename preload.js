@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('crabAPI', {
     ipcRenderer.on('pet-brain-weather', (_e, info) => callback(info));
   },
   findPlaces: (name) => ipcRenderer.invoke('pet-brain:geocode', name),
+  getModelStatus: () => ipcRenderer.invoke('pet-brain:model-status'),
+  pickModelFile: () => ipcRenderer.invoke('pet-brain:pick-model'),
   onPetDebug: (callback) => {
     ipcRenderer.on('pet-brain-debug', (_e, info) => callback(info));
   },

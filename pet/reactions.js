@@ -19,8 +19,21 @@ const { REACTION_CONFIG } = require('./config');
  *   isFullscreen?: () => Promise<boolean> | boolean,
  *   chattiness?: 'low' | 'normal' | 'high',
  *   log?: (message: string) => void,
+ *   takeFallbackReason?: () => string | null,
  * }} options
  */
+// Why a line came from the built-in bank instead of the model, worked out from the brain's counters
+// before and after the call. hint is the model service's own reason, when it has one.
+function fallbackReason(before, after, hint) {
+  if (hint) return hint;
+  if (!before || !after) return 'canned-only';
+  if (after.timeouts > before.timeouts) return 'timeout';
+  for (const name of Object.keys(after.rejected)) {
+    if (after.rejected[name] > (before.rejected[name] || 0)) return name;
+  }
+  return 'not-attempted'; // petBrain skipped the model: busy, inside its call gap, or switched off after repeated failures
+}
+
 function createReactionLayer(options) {
   const cfg = { ...REACTION_CONFIG, ...(options.config || {}) };
   const now = options.now || Date.now;
@@ -78,8 +91,16 @@ function createReactionLayer(options) {
       try { fullscreen = !!(await isFullscreen()); } catch (_) { fullscreen = false; }
       if (fullscreen) return blocked(reaction, 'fullscreen');
 
+      const statsBefore = typeof brain.stats === 'function' ? brain.stats() : null;
+      const started = now();
       const result = await brain.react(signals);
       const shownAt = now();
+      // Per-line metrics, debug console only: how long it took, and why it fell back if it did.
+      const source = result.source || 'canned';
+      const reason = source === 'model' ? null
+        : fallbackReason(statsBefore, typeof brain.stats === 'function' ? brain.stats() : null,
+          options.takeFallbackReason && options.takeFallbackReason());
+      log(`line ${result.reaction} source=${source} ms=${shownAt - started}${reason ? ` fallback=${reason}` : ''}`);
       lastShownAt.set(reaction, shownAt);
       lastAnyAt = shownAt;
       lastBlockLog = '';
@@ -117,4 +138,4 @@ function createReactionLayer(options) {
   };
 }
 
-module.exports = { createReactionLayer };
+module.exports = { createReactionLayer, fallbackReason };

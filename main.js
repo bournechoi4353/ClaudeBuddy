@@ -303,6 +303,21 @@ function applyPetBrainState() {
   if (active !== petSpriteLoaded && mainWin && !mainWin.isDestroyed()) loadMainWindow();
 }
 
+// Preferences status line for Smart lines. null while the pet brain is off.
+ipcMain.handle('pet-brain:model-status', () => (petController ? petController.modelStatus() : null));
+
+// Browse button for the model file. The chosen path still goes through prefs:set, which validates it.
+ipcMain.handle('pet-brain:pick-model', async () => {
+  if (!petBrainGate()) return null;
+  const parent = prefsWin && !prefsWin.isDestroyed() ? prefsWin : undefined;
+  const result = await dialog.showOpenDialog(parent, {
+    title: 'Choose the pet brain model',
+    properties: ['openFile'],
+    filters: [{ name: 'GGUF model', extensions: ['gguf'] }],
+  });
+  return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+});
+
 ipcMain.on('pet-brain:reset-lines', () => {
   if (petController) petController.resetLineHistory();
 });
@@ -314,6 +329,8 @@ function startPetBrain() {
     platform,
     powerMonitor: require('electron').powerMonitor,
     getPrefs: () => prefs,
+    // Where Smart lines looks for the model unless Preferences or PET_BRAIN_MODEL_PATH says otherwise.
+    defaultModelPath: path.join(app.getPath('userData'), 'models', 'pet-brain', require('./vendor/pet-brain/manifest.json').model.file),
     emit: (channel, payload) => {
       if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, payload);
     },
@@ -460,6 +477,7 @@ ipcMain.on('prefs:set', (_e, rawUpdates) => {
   if (updates && 'petBrainEnabled' in updates) applyPetBrainState();
   if (updates && 'petChattiness' in updates && petController) petController.setChattiness(prefs.petChattiness);
   if (updates && ('petWeatherEnabled' in updates || 'petWeatherPlace' in updates)) applyPetWeather();
+  if (updates && ('petSmartLines' in updates || 'petModelPath' in updates) && petController) petController.configureModel();
 });
 
 let prefsWin = null;
@@ -470,7 +488,8 @@ function openPreferencesWindow() {
   }
   prefsWin = new BrowserWindow({
     width: 400,
-    height: petBrainGate() ? 860 : 540, // room for the Pet brain section
+    // Room for the Pet brain section, but never taller than the screen (the page scrolls if it must).
+    height: petBrainGate() ? Math.min(980, screen.getPrimaryDisplay().workArea.height - 40) : 540,
     title: 'Clawd Preferences',
     // Windows draws this window's title-bar/taskbar icon from here; on macOS the
     // app bundle icon is used, so leave it unset there.

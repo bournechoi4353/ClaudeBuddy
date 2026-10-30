@@ -88,6 +88,36 @@
       window.crabAPI.setPref({ petChattiness: petChattiness.value });
     });
 
+    // Smart lines: local model, off by default. The status line comes from the main process.
+    const smart = $('petSmart');
+    const modelPath = $('petModelPath');
+    const modelStatus = $('petModelStatus');
+    smart.value = prefs.petSmartLines === true ? 'on' : 'off';
+    modelPath.value = prefs.petModelPath || '';
+    async function refreshModelStatus() {
+      try {
+        const status = await window.crabAPI.getModelStatus();
+        modelStatus.textContent = status ? status.line : '';
+      } catch (_) { /* window closing */ }
+    }
+    smart.addEventListener('change', () => {
+      window.crabAPI.setPref({ petSmartLines: smart.value === 'on' });
+      setTimeout(refreshModelStatus, 200);
+    });
+    modelPath.addEventListener('change', () => {
+      window.crabAPI.setPref({ petModelPath: modelPath.value.trim() });
+      setTimeout(refreshModelStatus, 200);
+    });
+    $('petModelBrowse').addEventListener('click', async () => {
+      const chosen = await window.crabAPI.pickModelFile();
+      if (!chosen) return;
+      modelPath.value = chosen;
+      window.crabAPI.setPref({ petModelPath: chosen });
+      setTimeout(refreshModelStatus, 200);
+    });
+    refreshModelStatus();
+    setInterval(refreshModelStatus, 2000);
+
     // Weather mood (opt-in). The place is stored on this machine in prefs.json.
     const weatherOn = $('petWeatherOn');
     const weatherBox = $('petWeatherBox');

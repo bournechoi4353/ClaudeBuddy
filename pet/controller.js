@@ -8,9 +8,12 @@
 const { createEventLayer } = require('./events');
 const { createReactionLayer } = require('./reactions');
 const { petBrainDebug } = require('./flag');
-const { createPetBrain } = require('../vendor/pet-brain/petBrain.js');
+const { createPetBrain, createWorkerBackend } = require('../vendor/pet-brain/petBrain.js');
 const { reactionFor } = require('../vendor/pet-brain/rules.js');
 const { createWeatherService } = require('./weatherService');
+const { createModelService } = require('./modelService');
+const { routeFor } = require('./router');
+const { MODEL_CONFIG } = require('./config');
 
 const SAMPLE_MS = 1000;      // idle time and activity share
 const MUSIC_MS = 20 * 1000;  // music state, so Spotify is not asked every second
@@ -29,6 +32,10 @@ const RETRY_REASONS = new Set(['startup-quiet', 'global-gap', 'fullscreen', 'bus
  *   now?: () => number,
  *   env?: object,
  *   createBrain?: () => object,
+ *   modelService?: object,
+ *   createWorkerBackend?: Function,
+ *   verifyModel?: Function,
+ *   defaultModelPath?: string,
  * }} deps
  */
 function createPetController(deps) {
@@ -36,10 +43,25 @@ function createPetController(deps) {
   const log = petBrainDebug(env) ? (message) => console.log(`[pet-brain] ${message}`) : () => {};
 
   const events = createEventLayer();
+
+  // Smart lines. Ambient lines are the only thing routed to the local model (see pet/router.js);
+  // with Smart lines off, or the model missing, the service hands every line back to the built-in bank.
+  const model = deps.modelService || createModelService({
+    getPrefs, env, log, now,
+    defaultModelPath: deps.defaultModelPath || null,
+    createWorkerBackend: deps.createWorkerBackend || createWorkerBackend,
+    verify: deps.verifyModel,
+  });
+  const createBrain = deps.createBrain || (() => (routeFor('ambient') === 'local'
+    // The reaction layer already spaces lines by a minute or more, so petBrain's own 3 s gap between model calls adds nothing.
+    ? createPetBrain({ backend: model.backend, timeoutMs: MODEL_CONFIG.timeoutMs, cooldownMs: 0 })
+    : createPetBrain({})));
+
   const reactions = createReactionLayer({
     now,
     log,
-    createBrain: deps.createBrain || (() => createPetBrain({})),
+    createBrain,
+    takeFallbackReason: () => model.takeFallbackReason(),
     isFullscreen: () => platform.isFrontmostFullscreen(),
     chattiness: getPrefs().petChattiness,
   });
@@ -121,6 +143,16 @@ function createPetController(deps) {
     noteFrontApp(name) { if (typeof name === 'string') frontApp = name; },
     /** For an external source, such as a shell or editor hook, to report build or error events. */
     pushEvent(name) { events.pushEvent(name, now()); },
+    /**
+     * Smart lines or the model path changed in Preferences. A fresh brain starts the model's
+     * failure counter over, so turning it on again always gets a clean try.
+     */
+    configureModel() {
+      model.configure();
+      reactions.resetLineHistory();
+    },
+    /** For the Preferences status line: { enabled, path, found, state, lastLatencyMs, ..., line }. */
+    modelStatus: () => ({ ...model.status(), line: model.statusLine() }),
     /** { enabled, place } from the user's preferences. */
     configureWeather: (settings) => weather.configure(settings),
     setChattiness: (level) => reactions.setChattiness(level),
@@ -129,7 +161,7 @@ function createPetController(deps) {
     dispose() {
       stop();
       weather.stop();
-      return reactions.dispose();
+      return Promise.all([reactions.dispose(), model.dispose()]).then(() => {});
     },
   };
 }
