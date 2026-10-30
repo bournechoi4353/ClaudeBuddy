@@ -27,11 +27,16 @@ test('anything unknown routes to Claude, never to the local model', () => {
 test('the Claude path never references the pet brain or the local model', () => {
   // agent.js is the typed-message path, tools.js holds every Gmail, Docs and Spotify tool.
   for (const file of ['agent.js', 'tools.js', 'google-auth.js', 'spotify-auth.js']) {
-    const source = read(file);
+    // One exception: agent.js asks pet/flag.js whether the pet is a raincloud or a crab, for its
+    // system prompt. flag.js has no requires (asserted below), so it cannot reach the brain or the model.
+    const source = read(file)
+      .replace(/^const \{ petBrainActive \} = require\('\.\/pet\/flag'\);\n/m, '')
+      .replace(/petBrainActive\(prefs, process\.env\)/g, 'false');
     for (const pattern of [/pet\//, /pet-brain/i, /modelService/, /node-llama-cpp/, /petBrain/, /petController/]) {
       assert.ok(!pattern.test(source), `${file} mentions ${pattern}`);
     }
   }
+  assert.ok(!/require\(/.test(read('pet/flag.js').replace(/^\s*\/\/.*$/gm, '')), 'pet/flag.js stays free of requires');
 });
 
 test('the chat-send handler (typed messages) never touches the pet brain', () => {

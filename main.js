@@ -21,6 +21,9 @@ const SIZES = [
   { label: 'Huge',   scale: 14 },
 ];
 const DEFAULT_SCALE = 6;
+// Name shown in dialogs, the tray menu and window titles. The pet's own name is the petName pref
+// (default 'drizzle', see agent.js). The app id, data folder and IPC channel names still say clawd.
+const APP_NAME = 'Drizzle';
 let prefs = loadPrefs();
 function currentScale() {
   return typeof prefs.scale === 'number' ? prefs.scale : DEFAULT_SCALE;
@@ -264,16 +267,16 @@ function maybeShowClaudeOnboarding() {
   const termName = platform.IS_WIN ? 'PowerShell (or Command Prompt)' : 'Terminal';
   const result = dialog.showMessageBoxSync({
     type: 'info',
-    title: 'Welcome to Clawd',
+    title: `Welcome to ${APP_NAME}`,
     message: 'Set up Claude',
     detail:
-      "Clawd talks using your Claude Pro/Max subscription — there's no API key to add.\n\n" +
+      `${APP_NAME} talks using your Claude Pro/Max subscription — there's no API key to add.\n\n` +
       "If you don't have Claude Code installed yet:\n" +
       "   1. Install it from https://claude.com/code\n" +
       `   2. Open ${termName} and run:  claude login\n` +
       "   3. Sign in with your Claude account\n" +
-      "   4. Quit and relaunch Clawd\n\n" +
-      "Clawd will appear and walk around regardless, but he can't chat until this is done.",
+      `   4. Quit and relaunch ${APP_NAME}\n\n` +
+      `${APP_NAME} will appear and wander around regardless, but it can't chat until this is done.`,
     buttons: ['Open claude.com/code', 'OK, I will do it later'],
     defaultId: 0,
     cancelId: 1,
@@ -427,10 +430,10 @@ ipcMain.on('open-menu', () => {
 ipcMain.on('chat-send', async (event, text) => {
   // First-launch naming ceremony — the very first chat message is interpreted
   // as the pet's new name, not as a question for the agent. Validates to
-  // lowercase alphanumeric/_/- only, 1-20 chars, falls back to "clawd".
+  // lowercase alphanumeric/_/- only, 1-20 chars, falls back to "drizzle".
   if (!prefs.hasOnboarded) {
     let name = (text || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20);
-    if (!name) name = 'clawd';
+    if (!name) name = 'drizzle';
     prefs.petName = name;
     prefs.hasOnboarded = true;
     savePrefs(prefs);
@@ -490,7 +493,7 @@ function openPreferencesWindow() {
     width: 400,
     // Room for the Pet brain section, but never taller than the screen (the page scrolls if it must).
     height: petBrainGate() ? Math.min(980, screen.getPrimaryDisplay().workArea.height - 40) : 540,
-    title: 'Clawd Preferences',
+    title: `${APP_NAME} Preferences`,
     // Windows draws this window's title-bar/taskbar icon from here; on macOS the
     // app bundle icon is used, so leave it unset there.
     icon: process.platform === 'win32' ? path.join(__dirname, 'build', 'icon.png') : undefined,
@@ -587,7 +590,7 @@ async function connectSpotify() {
     savePrefs(prefs);
     dialog.showMessageBox({
       type: 'info',
-      message: 'Clawd is connected to Spotify',
+      message: `${APP_NAME} is connected to Spotify`,
       detail: "Now say things like “play hello by adele”.",
       buttons: ['OK'],
     });
@@ -626,7 +629,7 @@ async function connectGoogle() {
     savePrefs(prefs);
     dialog.showMessageBox({
       type: 'info',
-      message: 'Clawd is connected to Google',
+      message: `${APP_NAME} is connected to Google`,
       detail: 'Now ask things like "check my email", "find email from X", "search drive for Y", "read the doc about Z".',
       buttons: ['OK'],
     });
@@ -655,7 +658,7 @@ function showAbout() {
   const googleOn = !!prefs.googleRefreshToken;
   dialog.showMessageBox({
     type: 'info',
-    message: `Clawd ${app.getVersion()}`,
+    message: `${APP_NAME} ${app.getVersion()}`,
     detail:
       'A pixel-art Claude pet for your desktop.\n\n' +
       `Spotify:  ${spotifyOn ? 'connected' : 'not connected'}\n` +
@@ -680,7 +683,7 @@ function buildTrayMenuTemplate() {
   const spotifyConnected = !!prefs.spotifyRefreshToken;
   return [
     { label: 'Preferences…', click: openPreferencesWindow },
-    { label: 'About Clawd', click: showAbout },
+    { label: `About ${APP_NAME}`, click: showAbout },
     { type: 'separator' },
     { label: 'Reset conversation', click: () => { agent.reset(); agent.warm().catch(() => {}); } },
     // Hidden debug item: only present while the pet brain is active.
@@ -721,7 +724,7 @@ function buildTrayMenuTemplate() {
       },
     },
     { type: 'separator' },
-    { label: 'Quit Clawd', click: () => app.quit() },
+    { label: `Quit ${APP_NAME}`, click: () => app.quit() },
   ];
 }
 
@@ -741,7 +744,7 @@ function createTray() {
     icon = nativeImage.createEmpty();
   }
   tray = new Tray(icon);
-  tray.setToolTip('Clawd');
+  tray.setToolTip(APP_NAME);
   rebuildTrayMenu();
 }
 

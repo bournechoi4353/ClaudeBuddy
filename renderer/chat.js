@@ -7,7 +7,7 @@ const inputEl = document.getElementById('input');
 
 const PANEL_W = 240;
 const PANEL_MARGIN = 8;
-let NAME = 'clawd';
+let NAME = 'drizzle';
 if (window.crabAPI && window.crabAPI.getPrefs) {
   window.crabAPI.getPrefs().then((p) => {
     if (p && typeof p.petName === 'string' && p.petName) NAME = p.petName;
@@ -56,7 +56,7 @@ window.crabAPI.onChatPiece((piece) => {
     } else if (raw.includes('network') || raw.includes('econn') || raw.includes('fetch failed')) {
       friendly = "can't reach the internet right now. check your wifi?";
     } else if (raw.includes('sdk load')) {
-      friendly = 'something\'s off with my brain. try restarting clawd?';
+      friendly = 'something\'s off with my brain. try restarting me?';
     } else {
       friendly = "hmm, something went sideways. try again?";
     }

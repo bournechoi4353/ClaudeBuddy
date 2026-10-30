@@ -12,7 +12,7 @@
   const sleepMin = $('sleepMin');
   const sleepMinVal = $('sleepMinVal');
 
-  petName.value = prefs.petName || 'clawd';
+  petName.value = prefs.petName || 'drizzle';
   personality.value = prefs.personality || 'default';
   skin.value = prefs.skin || 'default';
   speed.value = prefs.crabSpeed != null ? prefs.crabSpeed : 0.5;
@@ -47,7 +47,7 @@
 
   // Live save on each input change.
   petName.addEventListener('input', () => {
-    const v = petName.value.trim().toLowerCase() || 'clawd';
+    const v = petName.value.trim().toLowerCase() || 'drizzle';
     window.crabAPI.setPref({ petName: v });
   });
   personality.addEventListener('change', () => {
