@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { sanitizePetUpdates, CHATTINESS_LEVELS } = require('../pet/prefs');
+const { sanitizePetUpdates, cleanPlace, CHATTINESS_LEVELS } = require('../pet/prefs');
 
 test('chattiness accepts only the known levels', () => {
   assert.deepStrictEqual(CHATTINESS_LEVELS.sort(), ['high', 'low', 'normal']);
@@ -25,4 +25,22 @@ test('other preferences pass through untouched and inputs are not mutated', () =
   assert.strictEqual(input.petChattiness, 'bogus');
   assert.strictEqual(sanitizePetUpdates(null), null);
   assert.strictEqual(sanitizePetUpdates(undefined), undefined);
+});
+
+test('weather mood is a strict boolean and off unless true', () => {
+  assert.strictEqual(sanitizePetUpdates({ petWeatherEnabled: true }).petWeatherEnabled, true);
+  assert.strictEqual(sanitizePetUpdates({ petWeatherEnabled: 'on' }).petWeatherEnabled, false);
+  assert.strictEqual(sanitizePetUpdates({ petWeatherEnabled: 1 }).petWeatherEnabled, false);
+});
+
+test('a weather place is rounded to 2 decimals and validated', () => {
+  assert.deepStrictEqual(
+    sanitizePetUpdates({ petWeatherPlace: { label: 'Ashburn, Virginia', latitude: 39.04372, longitude: -77.48749, extra: 'x' } }).petWeatherPlace,
+    { label: 'Ashburn, Virginia', latitude: 39.04, longitude: -77.49 },
+  );
+  for (const bad of [{ latitude: 91, longitude: 0 }, { latitude: 0, longitude: 181 }, { latitude: '1', longitude: 2 }, { latitude: NaN, longitude: 2 }, 'home', 7, {}]) {
+    assert.ok(!('petWeatherPlace' in sanitizePetUpdates({ petWeatherPlace: bad })), JSON.stringify(bad));
+  }
+  assert.strictEqual(sanitizePetUpdates({ petWeatherPlace: null }).petWeatherPlace, null, 'clearing is allowed');
+  assert.strictEqual(cleanPlace({ latitude: 1, longitude: 2, label: 'x'.repeat(500) }).label.length, 100);
 });

@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onPetBubble: (callback) => {
     ipcRenderer.on('pet-brain-bubble', (_e, info) => callback(info));
   },
+  onPetWeather: (callback) => {
+    ipcRenderer.on('pet-brain-weather', (_e, info) => callback(info));
+  },
+  findPlaces: (name) => ipcRenderer.invoke('pet-brain:geocode', name),
   onPetDebug: (callback) => {
     ipcRenderer.on('pet-brain-debug', (_e, info) => callback(info));
   },

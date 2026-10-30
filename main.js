@@ -319,7 +319,27 @@ function startPetBrain() {
     },
   });
   petController.start();
+  applyPetWeather();
 }
+
+// Weather mood is opt-in and off by default. With it off (or no place chosen) no request is made.
+function applyPetWeather() {
+  if (!petController) return;
+  petController.configureWeather({ enabled: prefs.petWeatherEnabled === true, place: prefs.petWeatherPlace || null });
+}
+
+// City lookup for the Preferences "Find" button. Only works while Weather mood is on, and
+// sends just the typed name to Open-Meteo's geocoder.
+ipcMain.handle('pet-brain:geocode', async (_e, name) => {
+  if (!petBrainActive(prefs) || prefs.petWeatherEnabled !== true) return { error: 'Turn on Weather mood first.' };
+  const query = typeof name === 'string' ? name.trim().slice(0, 80) : '';
+  if (!query) return { error: 'Type a city name.' };
+  try {
+    return { results: await require('./vendor/pet-brain/weather.js').geocode(query) };
+  } catch (_) {
+    return { error: 'Could not reach the weather service.' };
+  }
+});
 
 // True when the page was loaded with the raincloud sprite (see loadMainWindow).
 let petSpriteLoaded = false;
@@ -439,6 +459,7 @@ ipcMain.on('prefs:set', (_e, rawUpdates) => {
   }
   if (updates && 'petBrainEnabled' in updates) applyPetBrainState();
   if (updates && 'petChattiness' in updates && petController) petController.setChattiness(prefs.petChattiness);
+  if (updates && ('petWeatherEnabled' in updates || 'petWeatherPlace' in updates)) applyPetWeather();
 });
 
 let prefsWin = null;
@@ -449,7 +470,7 @@ function openPreferencesWindow() {
   }
   prefsWin = new BrowserWindow({
     width: 400,
-    height: petBrainGate() ? 800 : 540, // room for the Pet brain section
+    height: petBrainGate() ? 860 : 540, // room for the Pet brain section
     title: 'Clawd Preferences',
     // Windows draws this window's title-bar/taskbar icon from here; on macOS the
     // app bundle icon is used, so leave it unset there.

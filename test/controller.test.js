@@ -176,3 +176,28 @@ test('an event changes the sprite pose immediately, ignoring the dwell', async (
   const states = all.filter((e) => e.channel === 'pet-brain-state').map((e) => e.reaction);
   assert.deepStrictEqual(states, ['greeting', 'stuck']);
 });
+
+test('weather stays off until configured, then reports poses to the renderer', async () => {
+  const sourcesMade = [];
+  const emitted = [];
+  const controller = createPetController({
+    now: () => START,
+    env: {},
+    platform: { isFrontmostFullscreen: async () => false, getMusicState: async () => 'none' },
+    powerMonitor: { getSystemIdleTime: () => 30 },
+    emit: (channel, payload) => emitted.push({ channel, ...payload }),
+    createBrain: () => ({ react: async (s) => ({ reaction: reactionFor(s), line: 'x', source: 'canned' }) }),
+    createWeatherSource: (args) => { sourcesMade.push(args); return { getPose: async () => 'wx_rain' }; },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.strictEqual(sourcesMade.length, 0, 'nothing is requested by default');
+
+  controller.configureWeather({ enabled: true, place: { latitude: 39.04, longitude: -77.49 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepStrictEqual(sourcesMade, [{ latitude: 39.04, longitude: -77.49 }]);
+  assert.deepStrictEqual(emitted.filter((e) => e.channel === 'pet-brain-weather').map((e) => e.pose), ['wx_rain']);
+
+  controller.configureWeather({ enabled: false });
+  assert.deepStrictEqual(emitted.filter((e) => e.channel === 'pet-brain-weather').map((e) => e.pose), ['wx_rain', null]);
+  await controller.dispose();
+});

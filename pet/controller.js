@@ -10,6 +10,7 @@ const { createReactionLayer } = require('./reactions');
 const { petBrainDebug } = require('./flag');
 const { createPetBrain } = require('../vendor/pet-brain/petBrain.js');
 const { reactionFor } = require('../vendor/pet-brain/rules.js');
+const { createWeatherService } = require('./weatherService');
 
 const SAMPLE_MS = 1000;      // idle time and activity share
 const MUSIC_MS = 20 * 1000;  // music state, so Spotify is not asked every second
@@ -41,6 +42,12 @@ function createPetController(deps) {
     createBrain: deps.createBrain || (() => createPetBrain({})),
     isFullscreen: () => platform.isFrontmostFullscreen(),
     chattiness: getPrefs().petChattiness,
+  });
+
+  // Weather mood is opt-in: the service stays idle until configureWeather() enables it.
+  const weather = createWeatherService({
+    createSource: deps.createWeatherSource,
+    onPose: (pose) => { log(`weather pose: ${pose}`); emit('pet-brain-weather', { pose }); },
   });
 
   let frontApp = '';
@@ -114,11 +121,14 @@ function createPetController(deps) {
     noteFrontApp(name) { if (typeof name === 'string') frontApp = name; },
     /** For an external source, such as a shell or editor hook, to report build or error events. */
     pushEvent(name) { events.pushEvent(name, now()); },
+    /** { enabled, place } from the user's preferences. */
+    configureWeather: (settings) => weather.configure(settings),
     setChattiness: (level) => reactions.setChattiness(level),
     resetLineHistory: () => reactions.resetLineHistory(),
     resetTimers: () => reactions.resetTimers(),
     dispose() {
       stop();
+      weather.stop();
       return reactions.dispose();
     },
   };

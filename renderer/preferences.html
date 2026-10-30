@@ -166,6 +166,19 @@
       <button type="button" id="petResetLines">Reset line history</button>
       <span class="hint" id="petResetNote" style="margin-top:0"></span>
     </div>
+
+    <label class="check"><input type="checkbox" id="petWeatherOn"> Weather mood</label>
+    <div class="hint">Off by default. When on, the pet sends only a rounded latitude and longitude (about 1 km) to Open-Meteo.com every 15 minutes or more, with no account or identifier, so the cloud can match the weather when it is idle. Like any web request, it reveals your IP address to them. Typing a city sends that name to Open-Meteo once, when you press Find.</div>
+    <div id="petWeatherBox" hidden>
+      <label class="field" for="petCity">City</label>
+      <div class="row">
+        <input type="text" id="petCity" placeholder="for example Ashburn, Virginia" maxlength="80" style="flex:1">
+        <button type="button" id="petFind">Find</button>
+      </div>
+      <select id="petPlaces" hidden></select>
+      <div class="hint" id="petPlaceNote"></div>
+    </div>
+    <div class="hint">Weather data by Open-Meteo.com (CC BY 4.0)</div>
   </div>
 
   <div class="footer">Other settings live in the menubar (size, monitor, Spotify, launch at login).</div>

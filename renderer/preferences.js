@@ -87,6 +87,54 @@
     petChattiness.addEventListener('change', () => {
       window.crabAPI.setPref({ petChattiness: petChattiness.value });
     });
+
+    // Weather mood (opt-in). The place is stored on this machine in prefs.json.
+    const weatherOn = $('petWeatherOn');
+    const weatherBox = $('petWeatherBox');
+    const city = $('petCity');
+    const places = $('petPlaces');
+    const placeNote = $('petPlaceNote');
+    function showPlaceNote() {
+      const place = prefs.petWeatherPlace;
+      placeNote.textContent = place && place.label ? 'Using ' + place.label : 'No place chosen yet.';
+    }
+    weatherOn.checked = prefs.petWeatherEnabled === true;
+    weatherBox.hidden = !weatherOn.checked;
+    showPlaceNote();
+    weatherOn.addEventListener('change', () => {
+      weatherBox.hidden = !weatherOn.checked;
+      window.crabAPI.setPref({ petWeatherEnabled: weatherOn.checked });
+    });
+    $('petFind').addEventListener('click', async () => {
+      placeNote.textContent = 'Looking up...';
+      places.hidden = true;
+      const reply = await window.crabAPI.findPlaces(city.value);
+      if (!reply || reply.error) {
+        placeNote.textContent = (reply && reply.error) || 'Lookup failed.';
+        return;
+      }
+      if (!reply.results.length) {
+        placeNote.textContent = 'No match. Try a nearby larger city.';
+        return;
+      }
+      places.innerHTML = '';
+      reply.results.forEach((r, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = r.label;
+        places.appendChild(opt);
+      });
+      const choose = () => {
+        const r = reply.results[parseInt(places.value, 10)];
+        prefs.petWeatherPlace = { label: r.label, latitude: r.latitude, longitude: r.longitude };
+        window.crabAPI.setPref({ petWeatherPlace: prefs.petWeatherPlace });
+        showPlaceNote();
+      };
+      places.onchange = choose;
+      places.hidden = false;
+      choose();
+    });
+
     $('petResetLines').addEventListener('click', () => {
       window.crabAPI.resetPetLines();
       const note = $('petResetNote');

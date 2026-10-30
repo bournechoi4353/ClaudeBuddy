@@ -155,6 +155,9 @@
     if (window.crabAPI.onPetBubble) {
       window.crabAPI.onPetBubble(queueBubble);
     }
+    if (window.crabAPI.onPetWeather) {
+      window.crabAPI.onPetWeather((info) => api.setWeatherPose(info ? info.pose : null));
+    }
     if (window.crabAPI.onPetDebug) {
       window.crabAPI.onPetDebug((info) => {
         if (info && info.cycle) startCycle(); else stopCycle();
