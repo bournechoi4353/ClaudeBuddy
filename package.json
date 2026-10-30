@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
     "pack": "electron-builder --mac --dir",
     "dist": "electron-builder --mac",
     "pack:win": "electron-builder --win --dir",
@@ -23,6 +24,8 @@
       "spotify-auth.js",
       "google-auth.js",
       "google-secrets.js",
+      "pet/**/*",
+      "vendor/**/*",
       "renderer/**/*",
       "package.json"
     ],

@@ -1,0 +1,122 @@
+[
+  {
+    "name": "focused",
+    "animation": "sit_quiet",
+    "description": "Idle under 60 s, steady or slow typing in code_editor, terminal or docs, no music playing or paused, no event."
+  },
+  {
+    "name": "stuck",
+    "animation": "head_tilt",
+    "description": "Event build_failed."
+  },
+  {
+    "name": "celebrate",
+    "animation": "jump_cheer",
+    "description": "Event build_passed."
+  },
+  {
+    "name": "late_night",
+    "animation": "yawn",
+    "description": "No event, hour 0 to 4, idle under 300 s."
+  },
+  {
+    "name": "long_idle",
+    "animation": "curl_up",
+    "description": "No event, idle 600 s or more, outside the goodnight hours."
+  },
+  {
+    "name": "welcome_back",
+    "animation": "wag_greet",
+    "description": "Event returned_from_idle."
+  },
+  {
+    "name": "new_song",
+    "animation": "head_bob",
+    "description": "No event, idle under 60 s, app_category music with music playing."
+  },
+  {
+    "name": "music_paused",
+    "animation": "ear_perk",
+    "description": "No event, idle under 60 s, music paused, and no more specific app rule applies (game, video, chat, docs with no or slow typing)."
+  },
+  {
+    "name": "fast_context_switching",
+    "animation": "dizzy_spin",
+    "description": "Event app_switched_often."
+  },
+  {
+    "name": "error_spotted",
+    "animation": "alert_pop",
+    "description": "Event error_dialog."
+  },
+  {
+    "name": "break_suggestion",
+    "animation": "stretch",
+    "description": "Event long_session outside the daytime (hours before 9 or after 17) and not steady or fast work in code_editor, terminal or docs."
+  },
+  {
+    "name": "greeting",
+    "animation": "wave",
+    "description": "No event, idle under 60 s, and no more specific rule applies (default for the active daytime)."
+  },
+  {
+    "name": "goodnight",
+    "animation": "sleepy_wave",
+    "description": "No event, hour 22 to 4, idle 600 s or more."
+  },
+  {
+    "name": "morning_start",
+    "animation": "stretch_sunrise",
+    "description": "No event, idle under 60 s, hour 5 to 8, nothing more specific applies."
+  },
+  {
+    "name": "deep_work_streak",
+    "animation": "proud_nod",
+    "description": "Event long_session with fast or steady typing in code_editor, terminal or docs."
+  },
+  {
+    "name": "music_vibe",
+    "animation": "dance_small",
+    "description": "No event, idle under 60 s, music playing in an app that has no more specific rule (not game, video, chat, music, or docs with no or slow typing)."
+  },
+  {
+    "name": "game_time",
+    "animation": "controller_hold",
+    "description": "No event, idle under 60 s, app_category game."
+  },
+  {
+    "name": "video_watching",
+    "animation": "popcorn",
+    "description": "No event, idle under 60 s, app_category video."
+  },
+  {
+    "name": "chat_chatter",
+    "animation": "chat_bubble",
+    "description": "No event, idle under 60 s, app_category chat."
+  },
+  {
+    "name": "reading_docs",
+    "animation": "reading_glasses",
+    "description": "No event, idle under 60 s, app_category docs with no or slow typing."
+  },
+  {
+    "name": "fast_typing",
+    "animation": "paw_blur",
+    "description": "No event, idle under 60 s, fast typing, with no music playing or paused and no more specific app rule."
+  },
+  {
+    "name": "short_idle",
+    "animation": "look_around",
+    "description": "No event, idle 60 to 599 s, outside lunch hours (12 and 13)."
+  },
+  {
+    "name": "hydrate_nudge",
+    "animation": "sip",
+    "description": "Event long_session, hour 9 to 17, not steady or fast work in code_editor, terminal or docs."
+  },
+  {
+    "name": "lunch_break",
+    "animation": "snack_hold",
+    "description": "No event, hour 12 or 13, idle 60 to 599 s."
+  }
+]
