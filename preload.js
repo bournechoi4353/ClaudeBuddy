@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onPetDebug: (callback) => {
     ipcRenderer.on('pet-brain-debug', (_e, info) => callback(info));
   },
+  resetPetLines: () => ipcRenderer.send('pet-brain:reset-lines'),
   getPrefs: () => ipcRenderer.invoke('prefs:get'),
   setPref: (updates) => ipcRenderer.send('prefs:set', updates),
   onPrefsUpdated: (callback) => {

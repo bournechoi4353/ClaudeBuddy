@@ -515,6 +515,7 @@ const IDLE_THOUGHTS = [
 let nextThoughtAt = performance.now() + 6 * 60_000 + Math.random() * 10 * 60_000;
 
 function maybeShowIdleThought(now) {
+  if (petSpriteWanted()) return; // the pet brain writes the idle commentary when it is on
   if (now < nextThoughtAt) return;
   if (isSleeping || externallyPaused || activeThought) {
     nextThoughtAt = now + 60_000; // try again in a minute
@@ -1067,6 +1068,9 @@ window.Crab = {
   setListening,
   dance: startDancing,
   showThought,
+  // True when an ambient bubble can show without stepping on anything: no bubble or timer
+  // alert up, not asleep, and the chat panel is closed (the crab pauses while it is open).
+  canShowAmbientBubble: () => !activeThought && !timerAlertActive && !isSleeping && !externallyPaused,
   refreshSize: recomputeSize,
   isOnboarding: () => onboardingActive,
   endOnboarding: () => { onboardingActive = false; },

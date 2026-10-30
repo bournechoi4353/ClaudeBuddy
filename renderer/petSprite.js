@@ -10,6 +10,9 @@
   const FRAME = 16; // raincloud.json frameSize; kept here so sizeFor() works before the sheet loads
   const HOLD_MS = 8000; // how long a bubble's pose stays up
   const CYCLE_MS = 2500; // debug pose cycler
+  const BUBBLE_MS = 7000; // how long a line stays in the bubble
+  const RETRY_MS = 1000; // while something else is on screen, check again this often
+  const RETRY_FOR_MS = 20000; // then give up on the line
 
   const params = new URLSearchParams(window.location.search);
 
@@ -20,6 +23,8 @@
   let held = null;         // { reaction, until } while a bubble is up
   let weatherPose = null;  // set by the weather feature
   let cycle = null;        // { poses, index, timer } while the debug cycler runs
+  let pendingBubble = null; // { reaction, line, giveUpAt } waiting for a free moment
+  let retryTimer = null;
   const debugClouds = new Map();
 
   // Whole-number pixel scale for the sprite, sized to match the crab at the same Size setting.
@@ -63,6 +68,31 @@
 
   function say(text, ms) {
     if (window.Crab && window.Crab.showThought) window.Crab.showThought(text, ms);
+  }
+
+  // Show the line in the crab's existing thought bubble, unless something else is using it
+  // (a timer alert, another bubble, chat open, asleep). If so, retry briefly, then drop it.
+  function tryShowBubble() {
+    if (!pendingBubble) return;
+    const crab = window.Crab;
+    if (performance.now() > pendingBubble.giveUpAt || !crab || !crab.canShowAmbientBubble) {
+      pendingBubble = null;
+    } else if (crab.canShowAmbientBubble()) {
+      crab.showThought(pendingBubble.line, BUBBLE_MS);
+      api.hold(pendingBubble.reaction, HOLD_MS);
+      pendingBubble = null;
+    }
+    if (!pendingBubble && retryTimer) {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }
+  }
+
+  function queueBubble(info) {
+    if (!info || typeof info.line !== 'string' || !info.line) return;
+    pendingBubble = { reaction: info.reaction, line: info.line, giveUpAt: performance.now() + RETRY_FOR_MS };
+    tryShowBubble();
+    if (pendingBubble && !retryTimer) retryTimer = setInterval(tryShowBubble, RETRY_MS);
   }
 
   function stopCycle() {
@@ -123,9 +153,7 @@
       window.crabAPI.onPetState((info) => { if (info) api.setLive(info.reaction); });
     }
     if (window.crabAPI.onPetBubble) {
-      window.crabAPI.onPetBubble((info) => {
-        if (info && info.reaction) api.hold(info.reaction, HOLD_MS);
-      });
+      window.crabAPI.onPetBubble(queueBubble);
     }
     if (window.crabAPI.onPetDebug) {
       window.crabAPI.onPetDebug((info) => {

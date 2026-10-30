@@ -70,6 +70,31 @@
       color: #888;
       margin-top: 3px;
     }
+    h2 {
+      font-size: 12px;
+      margin: 24px 0 0;
+      padding-top: 14px;
+      border-top: 1px solid #ddd;
+      letter-spacing: 0.5px;
+    }
+    label.check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 11px;
+      color: #333;
+    }
+    button {
+      font-family: inherit;
+      font-size: 11px;
+      padding: 5px 10px;
+      border: 1px solid #000;
+      background: #fff;
+      color: #000;
+      cursor: pointer;
+    }
+    button:hover { background: #f0eada; }
     .footer {
       margin-top: 24px;
       padding-top: 14px;
@@ -123,6 +148,25 @@
 
   <label class="field" for="sleepMin">Sleep after no chat: <output id="sleepMinVal">3</output> min</label>
   <input type="range" id="sleepMin" min="1" max="30" step="1">
+
+  <div id="petBrainSection" hidden>
+    <h2>Pet brain</h2>
+    <label class="check"><input type="checkbox" id="petBrainOn"> Pet brain on</label>
+    <div class="hint">The raincloud reacts to what you are doing and says a short line now and then. Lines come from a built-in set. Nothing leaves this machine.</div>
+
+    <label class="field" for="petChattiness">Chattiness</label>
+    <select id="petChattiness">
+      <option value="low">Low: rare bubbles</option>
+      <option value="normal">Normal</option>
+      <option value="high">High: chatty</option>
+    </select>
+    <div class="hint">Scales how long the pet waits between bubbles.</div>
+
+    <div class="row" style="margin-top:12px">
+      <button type="button" id="petResetLines">Reset line history</button>
+      <span class="hint" id="petResetNote" style="margin-top:0"></span>
+    </div>
+  </div>
 
   <div class="footer">Other settings live in the menubar (size, monitor, Spotify, launch at login).</div>
 

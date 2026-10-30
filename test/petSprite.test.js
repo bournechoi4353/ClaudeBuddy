@@ -9,7 +9,7 @@ const meta = require('../renderer/raincloud/raincloud.json');
 const rules = require('../vendor/pet-brain/rules.js');
 
 // Run petSprite.js in a bare sandbox that stands in for the renderer.
-function load(search, extra = {}) {
+function load(search, extra = {}, overrides = {}) {
   const refreshed = [];
   const win = {
     location: { search },
@@ -24,6 +24,7 @@ function load(search, extra = {}) {
     setInterval, clearInterval,
     fetch: () => Promise.reject(new Error('no network in tests')),
     Image: class {},
+    ...overrides,
   };
   vm.runInNewContext(SOURCE, sandbox);
   return { sprite: win.PetSprite, refreshed };
@@ -77,4 +78,59 @@ test('the sheet matches the manifest and ambient reactions are known', () => {
   }
   assert.strictEqual(meta.frameSize, 16);
   assert.strictEqual(meta.frameCount, 2);
+});
+
+test('a bubble line goes to the existing thought bubble, then holds the pose', () => {
+  let onBubble = null;
+  const shown = [];
+  const { sprite } = load('?scale=6&petbrain=1', {
+    crabAPI: { onPetBubble: (cb) => { onBubble = cb; } },
+    Crab: { canShowAmbientBubble: () => true, showThought: (text, ms) => shown.push({ text, ms }), refreshSize() {} },
+  });
+  onBubble({ reaction: 'focused', line: 'Smooth. I would say more, but I would ruin it.' });
+  assert.strictEqual(shown.length, 1);
+  assert.strictEqual(shown[0].text, 'Smooth. I would say more, but I would ruin it.');
+  assert.ok(sprite.wanted);
+});
+
+test('a bubble waits while another bubble is up, shows when free, and gives up after 20 seconds', () => {
+  let onBubble = null;
+  let clock = 0;
+  let busy = true;
+  let tick = null;
+  const shown = [];
+  load('?scale=6&petbrain=1', {
+    crabAPI: { onPetBubble: (cb) => { onBubble = cb; } },
+    Crab: { canShowAmbientBubble: () => !busy, showThought: (text) => shown.push(text), refreshSize() {} },
+  }, {
+    performance: { now: () => clock },
+    setInterval: (fn) => { tick = fn; return 1; },
+    clearInterval: () => { tick = null; },
+  });
+
+  onBubble({ reaction: 'greeting', line: 'first' });
+  assert.deepStrictEqual(shown, [], 'held back while busy');
+  assert.ok(tick, 'retry timer is running');
+  clock += 5000; busy = false; tick();
+  assert.deepStrictEqual(shown, ['first'], 'shown once the bubble is free');
+  assert.strictEqual(tick, null, 'retry timer stopped');
+
+  busy = true;
+  onBubble({ reaction: 'greeting', line: 'second' });
+  clock += 21000; tick();
+  busy = false;
+  assert.deepStrictEqual(shown, ['first'], 'dropped after the retry window, never shown late');
+});
+
+test('bubbles without a line are ignored', () => {
+  let onBubble = null;
+  const shown = [];
+  load('?scale=6&petbrain=1', {
+    crabAPI: { onPetBubble: (cb) => { onBubble = cb; } },
+    Crab: { canShowAmbientBubble: () => true, showThought: (text) => shown.push(text), refreshSize() {} },
+  });
+  onBubble(null);
+  onBubble({ reaction: 'focused' });
+  onBubble({ reaction: 'focused', line: '' });
+  assert.deepStrictEqual(shown, []);
 });

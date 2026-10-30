@@ -44,7 +44,8 @@ const { dialog, shell } = require('electron');
 const os = require('os');
 // Pet brain (ml-pet-brain branch): only the flag helper is loaded here. The brain itself
 // is required lazily and only when PET_BRAIN_LOCAL=1, so flag-off startup is unchanged.
-const { petBrainActive } = require('./pet/flag');
+const { petBrainActive, petBrainGate } = require('./pet/flag');
+const { sanitizePetUpdates } = require('./pet/prefs');
 
 // When a timer ends, the renderer hops Clawd + shows a thought bubble.
 tools.setTimerEndCallback(({ id, label }) => {
@@ -235,6 +236,11 @@ function startIdleChatter() {
     const max = 45 * 60 * 1000;
     const delay = min + Math.floor(Math.random() * (max - min));
     setTimeout(async () => {
+      // The pet brain writes the idle commentary when it is on.
+      if (petBrainActive(prefs)) {
+        queueNext();
+        return;
+      }
       // Don't pile on top of a recent battery / calendar / timer bubble.
       if (Date.now() - lastNotifyAt < 4 * 60 * 1000) {
         queueNext();
@@ -281,6 +287,26 @@ let currentDisplayId = null;
 // ---- Pet brain (off unless PET_BRAIN_LOCAL=1) ----
 let petController = null;
 let petPoseCycle = false;
+
+// Called when the Preferences master switch changes: start or stop the brain and swap the
+// sprite by reloading the pet window.
+function applyPetBrainState() {
+  const active = petBrainActive(prefs);
+  if (active) {
+    startPetBrain();
+  } else if (petController) {
+    petController.dispose();
+    petController = null;
+  }
+  petPoseCycle = false;
+  if (tray) rebuildTrayMenu();
+  if (active !== petSpriteLoaded && mainWin && !mainWin.isDestroyed()) loadMainWindow();
+}
+
+ipcMain.on('pet-brain:reset-lines', () => {
+  if (petController) petController.resetLineHistory();
+});
+
 function startPetBrain() {
   if (petController) return;
   const { createPetController } = require('./pet/controller');
@@ -293,6 +319,15 @@ function startPetBrain() {
     },
   });
   petController.start();
+}
+
+// True when the page was loaded with the raincloud sprite (see loadMainWindow).
+let petSpriteLoaded = false;
+function loadMainWindow() {
+  petSpriteLoaded = petBrainActive(prefs);
+  mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
+    search: `scale=${currentScale()}${petSpriteLoaded ? '&petbrain=1' : ''}`,
+  });
 }
 
 function createMainWindow(display) {
@@ -319,9 +354,7 @@ function createMainWindow(display) {
   mainWin.setAlwaysOnTop(true, 'screen-saver');
   mainWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWin.setIgnoreMouseEvents(true, { forward: true });
-  mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
-    search: `scale=${currentScale()}${petBrainActive(prefs) ? '&petbrain=1' : ''}`,
-  });
+  loadMainWindow();
 
   startAppSwitchWatcher(mainWin);
 }
@@ -388,8 +421,9 @@ ipcMain.on('chat-send', async (event, text) => {
 ipcMain.on('chat-reset', () => { agent.reset(); agent.warm().catch(() => {}); });
 
 // Preferences window IPC.
-ipcMain.handle('prefs:get', () => ({ ...prefs }));
-ipcMain.on('prefs:set', (_e, updates) => {
+ipcMain.handle('prefs:get', () => ({ ...prefs, ...(petBrainGate() ? { petBrainAvailable: true } : {}) }));
+ipcMain.on('prefs:set', (_e, rawUpdates) => {
+  const updates = sanitizePetUpdates(rawUpdates);
   Object.assign(prefs, updates || {});
   savePrefs(prefs);
   // Broadcast live updates to the main crab window so visual prefs
@@ -403,6 +437,8 @@ ipcMain.on('prefs:set', (_e, updates) => {
     agent.reset();
     agent.warm().catch(() => {});
   }
+  if (updates && 'petBrainEnabled' in updates) applyPetBrainState();
+  if (updates && 'petChattiness' in updates && petController) petController.setChattiness(prefs.petChattiness);
 });
 
 let prefsWin = null;
@@ -413,7 +449,7 @@ function openPreferencesWindow() {
   }
   prefsWin = new BrowserWindow({
     width: 400,
-    height: 540,
+    height: petBrainGate() ? 800 : 540, // room for the Pet brain section
     title: 'Clawd Preferences',
     // Windows draws this window's title-bar/taskbar icon from here; on macOS the
     // app bundle icon is used, so leave it unset there.

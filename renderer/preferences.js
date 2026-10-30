@@ -72,4 +72,26 @@
     sleepMinVal.textContent = sleepMin.value;
     window.crabAPI.setPref({ sleepMinutes: parseInt(sleepMin.value, 10) });
   });
+
+  // Pet brain section: main only reports petBrainAvailable when PET_BRAIN_LOCAL=1,
+  // so without the flag this section never appears.
+  if (prefs.petBrainAvailable) {
+    $('petBrainSection').hidden = false;
+    const petOn = $('petBrainOn');
+    const petChattiness = $('petChattiness');
+    petOn.checked = prefs.petBrainEnabled !== false;
+    petChattiness.value = prefs.petChattiness || 'normal';
+    petOn.addEventListener('change', () => {
+      window.crabAPI.setPref({ petBrainEnabled: petOn.checked });
+    });
+    petChattiness.addEventListener('change', () => {
+      window.crabAPI.setPref({ petChattiness: petChattiness.value });
+    });
+    $('petResetLines').addEventListener('click', () => {
+      window.crabAPI.resetPetLines();
+      const note = $('petResetNote');
+      note.textContent = 'Line history cleared.';
+      setTimeout(() => { note.textContent = ''; }, 2500);
+    });
+  }
 })();
