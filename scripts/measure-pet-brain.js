@@ -294,4 +294,7 @@ async function main() {
   console.log(JSON.stringify(summary, null, 1));
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+// The helpers are exported so scripts/measure-haiku.js scores another model on the same events.
+module.exports = { seeded, makeEvents, onTopic, sensibleLength, quantile, pct, ms };
+
+if (require.main === module) main().catch((err) => { console.error(err); process.exit(1); });

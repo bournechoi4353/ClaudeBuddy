@@ -150,3 +150,61 @@ The guards check rules, not quality, and the keyword test above is weak (the han
 - Odd, incoherent or off-persona: **14 of 48** (29 percent). Examples: "Goodnight. I'll be a goodnighter.", "Long and fast. A true partnership in disguise.", "Game time. I'll stay supportive, not a game.", "An error has appeared. It shows little.", "Reading carefully. The work is not getting any better." (negative about the user's work), "Welcome back. We're all very, very confused."
 
 This is one reader, a single pass, and the reader is a model, so treat it as a rough check on the 75 percent figure and not as a measurement. It agrees with the package's own finding (`vendor/pet-brain/manifest.json`, `eval`): the lines are fluent and fit the reaction, but they are rarely dry or funny, some are odd, and they lose to the hand-written bank in blind comparison. The guards pass those odd lines too, which is why 99.2 percent passing the guards and about 70 to 75 percent being good are both true.
+
+## Local model against Claude Haiku (hand-added, 2026-10-30)
+
+Measured by `scripts/measure-haiku.js` on 96 synthetic events, seed 1, the same events for both models. Haiku (`claude-haiku-5-5`) is zero shot with the same persona and signals line the local model gets, called through the Agent SDK on the Claude subscription. Its answers go through the same petBrain guards and the same scoring. Haiku's own timeout was lifted so slow answers still count for quality; speed against the app's 1500 ms budget is its own row.
+
+| Measure | Local model (CPU) | Haiku, running session | Haiku, fresh process |
+|---|---|---|---|
+| Typical line (p50) | 218 ms | 1893 ms | 3836 ms |
+| Slow line (p95) | 259 ms | 2808 ms | 5265 ms |
+| Slowest line | 283 ms | 3003 ms | 5786 ms |
+| Lines inside the 1500 ms budget | 100.0% | 21.1% | 0.0% |
+| Time to first token (p50) | n/a | 1729 ms | 3451 ms |
+| First call after start | 274 ms, after a 1867 ms load | 3372 ms (starts the CLI process) | 2634 ms (starts the CLI process) |
+| Passes the guards | 97.9% | 74.0% | 91.7% |
+| Acceptable (guards, length, on topic) | 77.1% | 42.7% | 43.8% |
+| Failed calls | 0 timeouts | 0 errors | 0 errors |
+
+"Typical" and "slow" are the middle and the 95th percentile of the warm calls. For the running session they exclude the first call of each session of 16; for the fresh process they exclude only the first call. The local figures are the CPU default and are measured inside the app's own backend; the local model needs about 1.5 GB of memory while loaded and Haiku needs none. The SDK also reports an API duration per call; it was left out because it can exceed the whole call time.
+
+Haiku lines the guards rejected (session):
+- morning_start, contradicts-signals: "Seven in the morning, slow typing, no music yet. Coffee's still in charge."
+- late_night, contradicts-signals: "Two a.m., music paused, still typing. Something's getting fixed, or at least attempted."
+- music_paused, persona: "Music paused, keys quiet. Taking a breather or just thinking it over, either is fine."
+- reading_docs, invalid: "Slow typing in a docs tab usually means the answer is in there somewhere. Good luck finding it."
+- fast_context_switching, contradicts-signals: "Three a.m., tabs flying, game open. Bed's still an option, for the record."
+
+First two accepted Haiku lines for eight reactions:
+- **focused**: "Docs is open and you've been idle a minute. Nothing's on fire yet."; "Seven a.m., steady typing in docs. Look at you, being productive."
+- **stuck**: "Build failed at 10pm. The compiler's winning, but you've got time."; "Build failed. Coffee first, then we'll look at it."
+- **celebrate**: "Build passed. Look at you, being competent at five in the afternoon."; "A passing build at 11 p.m. Go on, let yourself have that one."
+- **late_night**: "Midnight, a video, slow keys. Hope it's worth the sleep it's costing."
+- **long_idle**: "Ten a.m., long pause, steady typing. Picked back up without much fuss."; "Long break, morning music on. Hope the coffee's doing its job."
+- **welcome_back**: "Morning, a game, and you're back. Hope the game was worth the wait."; "Welcome back. The bug is still exactly where you left it."
+- **new_song**: "Five a.m., music playing, no typing. Early start, or no sleep?"; "A new song at noon is a small, reasonable luxury."
+- **music_paused**: "Music's off, typing's slow, and it's 10pm. Winding down, or stuck?"; "Seven a.m., fast typing in a terminal, music paused. Impressive, honestly."
+
+Haiku lines the guards rejected (fresh):
+- stuck, contradicts-signals: "Build failed again. Read the error first, then the rage."
+- chat_chatter, contradicts-signals: "Slow typing at six, long pause. Take your time, the couch isn't going anywhere."
+- deep_work_streak, contradicts-signals: "Long session, no music, fast hands. Bold choice. Carry on."
+- late_night, contradicts-signals: "Two a.m., steady typing. Still not judging. Mostly."
+- late_night, invalid: "Midnight, video on, music off, nobody's going anywhere. Honestly, that's a reasonable plan."
+### Reading the comparison (hand-added)
+
+**Speed.** The local model is about 9 times faster than Haiku in a running session at the typical line (218 ms against 1893 ms) and about 18 times faster than a fresh process (3836 ms). Inside the app's 1500 ms budget the local model made every line, Haiku made 21 percent in a running session and none from a fresh process. Used as the ambient writer, Haiku would fall back to a built-in line most of the time. Most of Haiku's time passes before the first token (1729 ms typical in a running session). This was measured through the Agent SDK, the only route a subscription setup has. A direct API call would skip the CLI process and was not measured.
+
+**Quality.** The "acceptable" row rewards lines that share words with the built-in bank, which the fine-tuned local model was trained on, so it understates Haiku. These counts are fairer:
+
+| Measure | Local model | Haiku, running session | Haiku, fresh process |
+|---|---|---|---|
+| Raw lines that restate the signals (a clock time, typing, keys or tabs) | 0 of 96 | 63 of 96 | 47 of 96 |
+| Rejected as contradicting the signals (wrong or invented detail) | 2 | 16 | 7 |
+
+Haiku, given the same persona with no examples, tends to read the signals back ("Seven a.m., steady typing in docs.") and to invent details such as coffee, a couch or a vending machine. A read of the sample lines above found some better than the model's ("The bug is still exactly where you left it.", "Build failed. Coffee first, then we'll look at it."), and many that read as a status line. That is one reader, a single pass, and the reader is a model, so treat it as indicative.
+
+The running session passed the guards less often than fresh calls (74 against 92 percent) with the same model and prompt. The conversation history probably primes it to echo the input format, but that was not tested.
+
+**Limits.** 96 events, 4 per reaction, one run, so rates carry roughly plus or minus 10 points of noise. Haiku was zero shot. A tuned prompt with a few example lines would likely cut the restating, and was not tried. The network and the service were in whatever state they were in on the morning of the run. About 200 Haiku calls were used from the Claude subscription, including smoke tests.
