@@ -1,0 +1,236 @@
+{
+  "version": 2,
+  "frameSize": 16,
+  "frameCount": 4,
+  "image": "raincloud_v2.png",
+  "imageScale4x": "raincloud_v2@4x.png",
+  "columns": 6,
+  "poses": {
+    "idle": {
+      "row": 0,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "drizzle": {
+      "row": 1,
+      "frames": 4,
+      "fps": 5,
+      "loop": true
+    },
+    "sunbreak": {
+      "row": 2,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "storm": {
+      "row": 3,
+      "frames": 4,
+      "fps": 8,
+      "loop": true
+    },
+    "sleepy": {
+      "row": 4,
+      "frames": 4,
+      "fps": 2.5,
+      "loop": true
+    },
+    "dizzy": {
+      "row": 5,
+      "frames": 4,
+      "fps": 6,
+      "loop": true
+    },
+    "music": {
+      "row": 6,
+      "frames": 4,
+      "fps": 5,
+      "loop": true
+    },
+    "focus": {
+      "row": 7,
+      "frames": 4,
+      "fps": 6,
+      "loop": true
+    },
+    "water": {
+      "row": 8,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "fade": {
+      "row": 9,
+      "frames": 4,
+      "fps": 2,
+      "loop": true
+    },
+    "hello": {
+      "row": 10,
+      "frames": 4,
+      "fps": 5,
+      "loop": true
+    },
+    "wx_clear_day": {
+      "row": 11,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "wx_clear_night": {
+      "row": 12,
+      "frames": 4,
+      "fps": 3,
+      "loop": true
+    },
+    "wx_partly": {
+      "row": 13,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "wx_overcast": {
+      "row": 14,
+      "frames": 4,
+      "fps": 2,
+      "loop": true
+    },
+    "wx_fog": {
+      "row": 15,
+      "frames": 4,
+      "fps": 3,
+      "loop": true
+    },
+    "wx_drizzle": {
+      "row": 16,
+      "frames": 4,
+      "fps": 5,
+      "loop": true
+    },
+    "wx_rain": {
+      "row": 17,
+      "frames": 4,
+      "fps": 8,
+      "loop": true
+    },
+    "wx_snow": {
+      "row": 18,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "wx_thunder": {
+      "row": 19,
+      "frames": 4,
+      "fps": 8,
+      "loop": true
+    },
+    "wx_windy": {
+      "row": 20,
+      "frames": 4,
+      "fps": 6,
+      "loop": true
+    },
+    "wx_hot": {
+      "row": 21,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "wx_cold": {
+      "row": 22,
+      "frames": 4,
+      "fps": 8,
+      "loop": true
+    },
+    "idle_side": {
+      "row": 23,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "move": {
+      "row": 24,
+      "frames": 4,
+      "fps": 8,
+      "loop": true
+    },
+    "blink": {
+      "row": 25,
+      "frames": 4,
+      "fps": 4,
+      "loop": true
+    },
+    "turn": {
+      "row": 26,
+      "frames": 5,
+      "fps": 22,
+      "loop": false
+    },
+    "look": {
+      "row": 27,
+      "frames": 6,
+      "fps": 4,
+      "loop": false
+    }
+  },
+  "defaultPose": "idle",
+  "facing": {
+    "native": "right",
+    "directionalPoses": [
+      "move",
+      "idle_side"
+    ],
+    "mirrorOffsetPx": 1,
+    "turnPose": "turn",
+    "restPose": "idle_side",
+    "movePose": "move"
+  },
+  "blink": {
+    "basePose": "idle",
+    "blinkPose": "blink",
+    "durationMs": 140,
+    "minGapMs": 2800,
+    "maxGapMs": 6500
+  },
+  "glance": {
+    "pose": "look",
+    "minGapMs": 7000,
+    "maxGapMs": 14000
+  },
+  "ambientReactions": [
+    "short_idle",
+    "music_paused",
+    "video_watching",
+    "game_time",
+    "chat_chatter",
+    "idle"
+  ],
+  "reactions": {
+    "focused": "focus",
+    "stuck": "drizzle",
+    "celebrate": "sunbreak",
+    "late_night": "sleepy",
+    "long_idle": "fade",
+    "welcome_back": "hello",
+    "new_song": "music",
+    "music_paused": "idle",
+    "fast_context_switching": "dizzy",
+    "error_spotted": "storm",
+    "break_suggestion": "water",
+    "greeting": "hello",
+    "goodnight": "sleepy",
+    "morning_start": "hello",
+    "deep_work_streak": "focus",
+    "music_vibe": "music",
+    "game_time": "idle",
+    "video_watching": "idle",
+    "chat_chatter": "idle",
+    "reading_docs": "focus",
+    "fast_typing": "focus",
+    "short_idle": "idle",
+    "hydrate_nudge": "water",
+    "lunch_break": "water"
+  }
+}
