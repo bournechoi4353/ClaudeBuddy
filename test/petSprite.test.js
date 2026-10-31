@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'petSprite.js'), 'utf8');
-const meta = require('../renderer/raincloud/raincloud.json');
+const meta = require('../renderer/raincloud/raincloud_v2.json');
 const rules = require('../vendor/pet-brain/rules.js');
 
 // Run petSprite.js in a bare sandbox that stands in for the renderer.
@@ -21,7 +21,7 @@ function load(search, extra = {}, overrides = {}) {
     URLSearchParams,
     performance: { now: () => 0 },
     console: { warn() {} },
-    setInterval, clearInterval,
+    setInterval, clearInterval, setTimeout, clearTimeout,
     fetch: () => Promise.reject(new Error('no network in tests')),
     Image: class {},
     ...overrides,
@@ -69,7 +69,10 @@ test('the shipped reactions map covers every reaction and points at real poses',
 test('the sheet matches the manifest and ambient reactions are known', () => {
   const rows = Object.values(meta.poses).map((p) => p.row);
   assert.strictEqual(new Set(rows).size, rows.length);
-  assert.strictEqual(Math.max(...rows) + 1, 23);
+  assert.strictEqual(Math.max(...rows) + 1, 28);
+  for (const [name, p] of Object.entries(meta.poses)) {
+    assert.ok(p.frames >= 1 && p.frames <= meta.columns, `${name} has a frame count that fits the sheet`);
+  }
   for (const name of meta.ambientReactions) {
     assert.ok(name === 'idle' || rules.REACTIONS.includes(name), `unknown ambient reaction ${name}`);
   }
@@ -77,7 +80,7 @@ test('the sheet matches the manifest and ambient reactions are known', () => {
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'renderer', 'raincloud', file)), `${file} is missing`);
   }
   assert.strictEqual(meta.frameSize, 16);
-  assert.strictEqual(meta.frameCount, 2);
+  assert.strictEqual(meta.frameCount, 4, 'the default frame count; each pose lists its own');
 });
 
 test('a bubble line goes to the existing thought bubble, then holds the pose', () => {
