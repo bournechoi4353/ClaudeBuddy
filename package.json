@@ -1,7 +1,8 @@
 {
-  "name": "clawd",
+  "name": "drizzle",
+  "productName": "Drizzle",
   "version": "0.1.0",
-  "description": "Clawd — an 8-bit pixel crab Claude pet for your desktop",
+  "description": "Drizzle, an 8-bit pixel raincloud Claude pet for your desktop",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -14,13 +15,14 @@
   },
   "build": {
     "appId": "dev.clawd.app",
-    "productName": "Clawd",
+    "productName": "Drizzle",
     "files": [
       "main.js",
       "preload.js",
       "agent.js",
       "tools.js",
       "platform.js",
+      "userdata-migration.js",
       "spotify-auth.js",
       "google-auth.js",
       "google-secrets.js",
@@ -52,10 +54,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Clawd"
+      "shortcutName": "Drizzle"
     },
     "dmg": {
-      "title": "Clawd",
+      "title": "Drizzle",
       "icon": "build/icon.png",
       "contents": [
         {

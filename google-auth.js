@@ -54,22 +54,22 @@ function generatePKCE() {
   return { verifier, challenge };
 }
 
-const SUCCESS_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Clawd connected</title>
+const SUCCESS_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Drizzle connected</title>
 <style>body{font-family:-apple-system,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f5f0e6;color:#000}main{text-align:center}h1{font-size:22px;margin:0 0 8px}p{color:#444}</style>
-</head><body><main><h1>clawd is connected to google</h1><p>you can close this tab.</p></main></body></html>`;
+</head><body><main><h1>drizzle is connected to google</h1><p>you can close this tab.</p></main></body></html>`;
 
-const ERROR_HTML = (msg) => `<!doctype html><html><head><meta charset="utf-8"><title>Clawd error</title>
+const ERROR_HTML = (msg) => `<!doctype html><html><head><meta charset="utf-8"><title>Drizzle error</title>
 <style>body{font-family:-apple-system,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f5f0e6}main{text-align:center}h1{font-size:22px;color:#a00;margin:0 0 8px}</style>
 </head><body><main><h1>connection failed</h1><p>${msg}</p></main></body></html>`;
 
 function connect() {
   return new Promise((resolve, reject) => {
     if (!CLIENT_ID || CLIENT_ID.startsWith('YOUR_')) {
-      reject(new Error("Google OAuth client ID isn't configured yet. The Clawd developer needs to set up a Google Cloud OAuth credential. See README → Google setup."));
+      reject(new Error("Google OAuth client ID isn't configured yet. The Drizzle developer needs to set up a Google Cloud OAuth credential. See README → Google setup."));
       return;
     }
     if (!CLIENT_SECRET) {
-      reject(new Error("Google OAuth client secret is missing (google-secrets.js not present or unfilled). If you installed via the curl one-liner, the maintainer hasn't shipped a secret in their repo — you'll need to fork Clawd and add your own."));
+      reject(new Error("Google OAuth client secret is missing (google-secrets.js not present or unfilled). If you installed via the curl one-liner, the maintainer hasn't shipped a secret in their repo — you'll need to fork Drizzle and add your own."));
       return;
     }
 

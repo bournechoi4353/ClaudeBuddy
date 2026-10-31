@@ -36,11 +36,11 @@ function generatePKCE() {
   return { verifier, challenge };
 }
 
-const SUCCESS_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Clawd connected</title>
+const SUCCESS_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Drizzle connected</title>
 <style>body{font-family:-apple-system,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f5f0e6;color:#000}main{text-align:center}h1{font-size:22px;margin:0 0 8px}p{color:#444}</style>
-</head><body><main><h1>clawd is connected to spotify</h1><p>you can close this tab.</p></main></body></html>`;
+</head><body><main><h1>drizzle is connected to spotify</h1><p>you can close this tab.</p></main></body></html>`;
 
-const ERROR_HTML = (msg) => `<!doctype html><html><head><meta charset="utf-8"><title>Clawd error</title>
+const ERROR_HTML = (msg) => `<!doctype html><html><head><meta charset="utf-8"><title>Drizzle error</title>
 <style>body{font-family:-apple-system,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f5f0e6}main{text-align:center}h1{font-size:22px;color:#a00;margin:0 0 8px}</style>
 </head><body><main><h1>connection failed</h1><p>${msg}</p></main></body></html>`;
 

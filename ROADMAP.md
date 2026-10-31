@@ -1,6 +1,6 @@
-# Clawd Roadmap
+# Drizzle Roadmap
 
-Clawd — a desktop pixel-art crab who is also Claude. Walks around your screen and chats. Powered by your Claude Pro/Max subscription via the Claude Agent SDK (no API key needed).
+Drizzle (formerly Clawd) — a desktop pixel-art pet, a raincloud or a crab, who is also Claude. Walks around your screen and chats. Powered by your Claude Pro/Max subscription via the Claude Agent SDK (no API key needed).
 
 ---
 

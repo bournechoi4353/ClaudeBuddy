@@ -3,6 +3,14 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
+// The app used to be called Clawd and kept its data in a folder of that name. On the first start
+// as Drizzle, carry the settings over (a copy: the old folder is left alone). This has to run
+// before anything reads prefs.json.
+require('./userdata-migration').migrateLegacyUserData({
+  appData: app.getPath('appData'),
+  userData: app.getPath('userData'),
+});
+
 // Tiny prefs file so user choices survive relaunches.
 const PREFS_PATH = path.join(app.getPath('userData'), 'prefs.json');
 function loadPrefs() {
@@ -22,7 +30,8 @@ const SIZES = [
 ];
 const DEFAULT_SCALE = 6;
 // Name shown in dialogs, the tray menu and window titles. The pet's own name is the petName pref
-// (default 'drizzle', see agent.js). The app id, data folder and IPC channel names still say clawd.
+// (default 'drizzle', see agent.js). The app id (dev.clawd.app), the signing certificate name and the
+// IPC channel names still say clawd, so permissions and the login item carry over.
 const APP_NAME = 'Drizzle';
 let prefs = loadPrefs();
 function currentScale() {

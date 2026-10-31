@@ -1,8 +1,9 @@
-# Clawd one-line installer for Windows.
+# Drizzle one-line installer for Windows.
 #
 #   irm https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.ps1 | iex
 #
-# Downloads the source into %LOCALAPPDATA%\Clawd-src, installs dependencies, and
+# Downloads the source into %LOCALAPPDATA%\Clawd-src (the app used to be called Clawd, and
+# keeping that folder name lets an existing install be replaced in place), installs dependencies, and
 # wires up Start Menu + Desktop shortcuts that launch it. The Windows counterpart
 # to install.sh (macOS).
 #
@@ -88,7 +89,7 @@ function Repair-Electron($srcDir, $node) {
 $origDir = Get-Location
 
 try {
-  Write-Host "Installing Clawd..." -ForegroundColor White
+  Write-Host "Installing Drizzle..." -ForegroundColor White
 
   # ---- preflight -------------------------------------------------------------
 
@@ -151,7 +152,7 @@ try {
 
   # Claude Code heads-up (chat won't work without it, but it's not needed to build)
   if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\.credentials.json'))) {
-    Info "Heads up: Clawd chats through your Claude Pro/Max subscription via Claude Code."
+    Info "Heads up: Drizzle chats through your Claude Pro/Max subscription via Claude Code."
     Info "After install, get it from https://claude.com/code and run 'claude login'."
   }
 
@@ -167,7 +168,7 @@ try {
   $inner = Get-ChildItem $tmpExtract -Directory | Select-Object -First 1
   if (-not $inner) { Fail "The downloaded source looks empty."; return }
 
-  # Stop a running Clawd before we replace its source/node_modules. It runs as
+  # Stop a running Drizzle before we replace its source/node_modules. It runs as
   # electron.exe out of $SrcDir; match by path so we don't touch other Electron
   # apps (VS Code, etc.).
   Get-Process electron -ErrorAction SilentlyContinue |
@@ -218,36 +219,44 @@ try {
   $electronExe = Join-Path $SrcDir 'node_modules\electron\dist\electron.exe'
   if (-not (Test-Path $electronExe)) { Fail "Electron runtime missing - install did not complete."; return }
   $appArg = '"' + $SrcDir + '"'
-  # Use the crab icon (build/icon.ico ships in the source) instead of the default
+  # Use the Drizzle icon (build/icon.ico ships in the source) instead of the default
   # Electron atom; fall back to electron.exe only if it's somehow missing.
   $iconIco = Join-Path $SrcDir 'build\icon.ico'
   $iconLoc = if (Test-Path $iconIco) { $iconIco } else { $electronExe }
 
-  $shell = New-Object -ComObject WScript.Shell
-  foreach ($lnk in @(
+  # Shortcuts and the Add/Remove Programs entry from when the app was called Clawd are replaced.
+  foreach ($old in @(
       (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Clawd.lnk'),
       (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Clawd.lnk'))) {
+    Remove-Item $old -Force -ErrorAction SilentlyContinue
+  }
+  Remove-Item 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clawd' -Recurse -Force -ErrorAction SilentlyContinue
+
+  $shell = New-Object -ComObject WScript.Shell
+  foreach ($lnk in @(
+      (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Drizzle.lnk'),
+      (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Drizzle.lnk'))) {
     $s = $shell.CreateShortcut($lnk)
     $s.TargetPath       = $electronExe
     $s.Arguments        = $appArg
     $s.WorkingDirectory = $SrcDir
     $s.IconLocation     = $iconLoc
-    $s.Description       = 'Clawd - a pixel crab that is also Claude'
+    $s.Description       = 'Drizzle - a pixel raincloud that is also Claude'
     $s.Save()
   }
 
-  # Register a per-user Add/Remove Programs entry so Clawd appears in
+  # Register a per-user Add/Remove Programs entry so Drizzle appears in
   # Settings > Apps > Installed apps with a working Uninstall button. HKCU =
   # no admin needed. The Uninstall button runs the shipped uninstall.ps1.
-  $unKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clawd'
+  $unKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Drizzle'
   $uninstallPs1 = Join-Path $SrcDir 'uninstall.ps1'
   if (Test-Path $uninstallPs1) {
     $ver = try { (Get-Content (Join-Path $SrcDir 'package.json') -Raw | ConvertFrom-Json).version } catch { '1.0.0' }
     $unCmd = 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $uninstallPs1 + '"'
     New-Item -Path $unKey -Force | Out-Null
-    Set-ItemProperty $unKey 'DisplayName'      'Clawd'
+    Set-ItemProperty $unKey 'DisplayName'      'Drizzle'
     Set-ItemProperty $unKey 'DisplayVersion'   $ver
-    Set-ItemProperty $unKey 'Publisher'        'Clawd'
+    Set-ItemProperty $unKey 'Publisher'        'Drizzle'
     Set-ItemProperty $unKey 'DisplayIcon'      $iconLoc
     Set-ItemProperty $unKey 'InstallLocation'  $SrcDir
     Set-ItemProperty $unKey 'UninstallString'  $unCmd
@@ -259,13 +268,13 @@ try {
 
   # ---- launch ----------------------------------------------------------------
 
-  Step "Launching Clawd"
+  Step "Launching Drizzle"
   Start-Process -FilePath $electronExe -ArgumentList $appArg -WorkingDirectory $SrcDir
 
   Write-Host ""
-  Ok "Done. Clawd is running - look at the bottom of your screen."
+  Ok "Done. Drizzle is running - look at the bottom of your screen."
   Write-Host ""
-  Write-Host "Settings: right-click the crab, or click the Clawd icon in the system tray" -ForegroundColor White
+  Write-Host "Settings: right-click the pet, or click the Drizzle icon in the system tray" -ForegroundColor White
   Write-Host "(bottom-right by the clock - it may be under the '^' hidden-icons arrow)." -ForegroundColor White
   Write-Host ""
   Write-Host "If chat shows an error, set up Claude:" -ForegroundColor White

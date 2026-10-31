@@ -745,7 +745,7 @@ open location "spotify:search:${q}"`);
       content: [
         {
           type: 'text',
-          text: `opened spotify with search for "${q}". (clawd can play a specific track if given a spotify URI, but search→play requires the spotify web api which isn't wired up yet.)`,
+          text: `opened spotify with search for "${q}". (i can play a specific track if given a spotify URI, but search→play requires the spotify web api which isn't wired up yet.)`,
         },
       ],
     };

@@ -1,14 +1,16 @@
 #!/bin/bash
-# Clawd one-line installer.
+# Drizzle one-line installer.
 #
 #   curl -fsSL https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.sh | bash
 #
-# Clones the source, builds Clawd locally, signs with a self-signed cert,
+# Clones the source, builds Drizzle locally, signs with a self-signed cert,
 # installs to /Applications.
 
 set -e
 
 REPO_URL="https://github.com/bournechoi4353/ClaudeBuddy.git"
+# Still called Clawd-src (the app used to be Clawd) so an existing checkout is updated in place
+# and its node_modules are reused, instead of cloning and installing everything again.
 SRC_DIR="$HOME/Library/Application Support/Clawd-src"
 
 c_red()   { printf "\033[31m%s\033[0m\n" "$1"; }
@@ -17,19 +19,19 @@ c_blue()  { printf "\033[34m%s\033[0m\n" "$1"; }
 c_bold()  { printf "\033[1m%s\033[0m\n" "$1"; }
 step()    { printf "\n\033[1;34m▸ %s\033[0m\n" "$1"; }
 
-c_bold "Installing Clawd..."
+c_bold "Installing Drizzle..."
 
 # ---- preflight ---------------------------------------------------------------
 
 if [[ "$(uname)" != "Darwin" ]]; then
-  c_red "Clawd only runs on macOS."
+  c_red "Drizzle only runs on macOS."
   exit 1
 fi
 
 ARCH=$(uname -m)
 case "$ARCH" in
-  arm64) APP_DIST="dist/mac-arm64/Clawd.app" ;;
-  x86_64) APP_DIST="dist/mac/Clawd.app" ;;
+  arm64) APP_DIST="dist/mac-arm64/Drizzle.app" ;;
+  x86_64) APP_DIST="dist/mac/Drizzle.app" ;;
   *)
     c_red "Unsupported architecture: $ARCH"
     exit 1
@@ -57,7 +59,7 @@ if ! command -v git &>/dev/null; then
 fi
 
 if [[ ! -f "$HOME/.claude/.credentials.json" ]]; then
-  c_blue "Heads up: Clawd needs Claude Code installed and logged in to chat."
+  c_blue "Heads up: Drizzle needs Claude Code installed and logged in to chat."
   c_blue "After install, visit https://claude.com/code, then run: claude login"
 fi
 
@@ -92,17 +94,17 @@ fi
 
 # ---- build -------------------------------------------------------------------
 
-step "Building Clawd.app"
+step "Building Drizzle.app"
 npm run pack 2>&1 | tail -3 || true
 
 if [[ ! -d "$APP_DIST" ]]; then
   # electron-builder occasionally lands the .app at a slightly different path
   # depending on the version; fall back to a glob.
-  FOUND=$(ls -d dist/*/Clawd.app 2>/dev/null | head -1)
+  FOUND=$(ls -d dist/*/Drizzle.app 2>/dev/null | head -1)
   if [[ -n "$FOUND" ]]; then
     APP_DIST="$FOUND"
   else
-    c_red "Build failed — no Clawd.app produced under dist/"
+    c_red "Build failed — no Drizzle.app produced under dist/"
     exit 1
   fi
 fi
@@ -110,9 +112,12 @@ fi
 # ---- install -----------------------------------------------------------------
 
 step "Installing to /Applications"
-# If Clawd is running, kill it so we can overwrite.
+# If Drizzle (or Clawd, its old name) is running, kill it so we can overwrite.
+pkill -f "Drizzle.app" 2>/dev/null || true
 pkill -f "Clawd.app" 2>/dev/null || true
 sleep 1
+rm -rf /Applications/Drizzle.app
+# The app used to be installed as Clawd.app. Replace that copy too, so there is only one.
 rm -rf /Applications/Clawd.app
 cp -R "$APP_DIST" /Applications/
 
@@ -123,7 +128,7 @@ c_green "Done."
 echo
 c_bold "First launch:"
 echo "  1. Open Finder → Applications"
-echo "  2. RIGHT-CLICK Clawd → Open  (one-time Gatekeeper warning)"
+echo "  2. RIGHT-CLICK Drizzle → Open  (one-time Gatekeeper warning)"
 echo "  3. Click Open in the dialog"
 echo
 c_bold "If you haven't yet, set up Claude:"
@@ -132,5 +137,5 @@ echo "  2. In a terminal:  claude login"
 echo "  3. Sign in with your Pro/Max account"
 echo
 c_bold "Optional — Spotify auto-play:"
-echo "  Click 'clawd' in the menubar → Connect Spotify"
+echo "  Click the Drizzle cloud icon in the menubar → Connect Spotify"
 echo

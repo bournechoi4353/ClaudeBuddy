@@ -2,9 +2,9 @@
 https://github.com/user-attachments/assets/b6603a68-3ae0-4098-bf8c-6c0ec1cbfa7f
 
 
-# Clawd
+# Drizzle
 
-Clawd is a little pixel crab who lives on your desktop, and he's also Claude. Click him and a tiny chat window pops up over his head. He can look at your screen, control Spotify, hop around when you switch apps, doze off when you ignore him, and wander along the bottom of whichever monitor you put him on.
+Drizzle is a little pixel pet who lives on your desktop, and he's also Claude. He is a raincloud when the pet brain is on (see `docs/PET_BRAIN.md`) and a crab otherwise. Click him and a tiny chat window pops up over his head. He can look at your screen, control Spotify, hop around when you switch apps, doze off when you ignore him, and wander along the bottom of whichever monitor you put him on.
 
 Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no API key, no per-token billing**.
 
@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/ins
 That's it. The installer:
 - checks your machine meets the requirements
 - pulls the source
-- builds Clawd locally
+- builds Drizzle locally
 - signs it with a local certificate
 - installs it to `/Applications`
 
@@ -39,7 +39,7 @@ That's the whole thing. The installer will:
 
 - install Node.js for you (using winget) if you don't have it
 - download the source
-- build Clawd on your machine
+- build Drizzle on your machine
 - drop it in `%LOCALAPPDATA%\Clawd-src` with Start Menu and Desktop shortcuts
 - launch it
 
@@ -55,20 +55,20 @@ Want the source build instead of the `.dmg`? Open Terminal and paste:
 curl -fsSL https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.sh | bash
 ```
 
-It checks your machine, pulls the source, builds Clawd, signs it with a local certificate, and installs it to `/Applications`. First build takes a couple of minutes, reinstalls take about thirty seconds. Same first launch step applies: right click Clawd and choose Open.
+It checks your machine, pulls the source, builds Drizzle, signs it with a local certificate, and installs it to `/Applications`. First build takes a couple of minutes, reinstalls take about thirty seconds. Same first launch step applies: right click Drizzle and choose Open.
 
 ## What you need
 
 - A **Mac on Apple Silicon** (M1, M2, M3, M4). Intel Macs should work too if you build from source, they just aren't tested yet.
 - Or **Windows 10 or 11** (x64 or ARM64), installed with the PowerShell line above. A few Mac only features fall back gracefully on Windows, see "What's different on Windows" near the bottom.
 - **A Claude Pro or Max subscription.**
-- **Claude Code installed and signed in.** Grab it from [claude.com/code](https://claude.com/code) and run `claude login`. Clawd can walk around without this, but he can't chat until you do it.
+- **Claude Code installed and signed in.** Grab it from [claude.com/code](https://claude.com/code) and run `claude login`. Drizzle can walk around without this, but he can't chat until you do it.
 - **Node.js 20 or newer**, only if you're building from source. `brew install node` on Mac, or [nodejs.org](https://nodejs.org) anywhere.
-- **Spotify desktop app**, optional, only if you want Clawd to play music.
+- **Spotify desktop app**, optional, only if you want Drizzle to play music.
 
 ## Set up Claude (one time)
 
-Clawd uses your subscription instead of an API key, so there's nothing to paste into a config file. You just need Claude Code logged in:
+Drizzle uses your subscription instead of an API key, so there's nothing to paste into a config file. You just need Claude Code logged in:
 
 1. Install Claude Code from [claude.com/code](https://claude.com/code).
 2. Open a terminal and run:
@@ -79,43 +79,43 @@ Clawd uses your subscription instead of an API key, so there's nothing to paste 
 
 3. Sign in with your Claude Pro or Max account.
 
-That's it. Clawd reads the login that Claude Code saves to `~/.claude/.credentials.json` and starts chatting.
+That's it. Drizzle reads the login that Claude Code saves to `~/.claude/.credentials.json` and starts chatting.
 
 ## Connect Spotify (optional)
 
-1. Click the **`clawd`** label in your Mac menu bar, up near the clock.
+1. Click the **Drizzle cloud icon** in your Mac menu bar, up near the clock.
 2. Pick **Connect Spotify**.
 3. Your browser opens Spotify's sign in page. Log in and click **Agree**.
-4. When the page says "clawd is connected to spotify", close the tab.
+4. When the page says "drizzle is connected to spotify", close the tab.
 
-Now you can say things like "play hello by adele" and it just plays. Premium accounts get a clean experience through the Spotify Web API, and Free accounts fall back to controlling the desktop app directly. To unhook it later, the same menu item turns into **Disconnect Spotify**. Clawd never sees your password, it's a normal OAuth login and the token stays on your own machine.
+Now you can say things like "play hello by adele" and it just plays. Premium accounts get a clean experience through the Spotify Web API, and Free accounts fall back to controlling the desktop app directly. To unhook it later, the same menu item turns into **Disconnect Spotify**. Drizzle never sees your password, it's a normal OAuth login and the token stays on your own machine.
 
 ## Granting Screen Recording
 
-The first time Clawd peeks at your screen (the "what's on my screen" type questions), macOS asks for permission.
+The first time Drizzle peeks at your screen (the "what's on my screen" type questions), macOS asks for permission.
 
-1. Click Clawd and ask "what's on my screen?"
+1. Click Drizzle and ask "what's on my screen?"
 2. Click **Open System Settings** when the prompt shows up.
-3. Turn **Clawd** on under Privacy & Security, then Screen Recording.
-4. **Quit Clawd from the menu bar** (`clawd`, then Quit Clawd) and open him again. macOS only applies the new permission after a full restart of the app.
+3. Turn **Drizzle** on under Privacy & Security, then Screen Recording.
+4. **Quit Drizzle from the menu bar** (the cloud icon, then Quit Drizzle) and open him again. macOS only applies the new permission after a full restart of the app.
 
 Because the build uses a stable certificate, you only grant this once. It sticks around through future updates.
 
-## Using Clawd
+## Using Drizzle
 
-Clawd strolls back and forth along the bottom of one monitor. He mixes up a few moods, walking, pausing, stretching, the odd quick scuttle, and he hops when you switch apps.
+Drizzle strolls back and forth along the bottom of one monitor. He mixes up a few moods, walking, pausing, stretching, the odd quick scuttle, and he hops when you switch apps.
 
 ### Chatting
 
-Click on Clawd and a small chat box opens above him. Type, press Enter. Press Esc or click away to close it.
+Click on Drizzle and a small chat box opens above him. Type, press Enter. Press Esc or click away to close it.
 
 ### Things you can ask
 
 - "what time is it"
 - "what app am i in"
-- "what's on my screen" (Clawd puts on reading glasses while he looks)
+- "what's on my screen" (Drizzle puts on reading glasses while he looks)
 - "read my chrome tab" or "look at slack"
-- "what's playing" (Clawd puts on headphones to check Spotify)
+- "what's playing" (Drizzle puts on headphones to check Spotify)
 - "pause", "skip", "previous track"
 - "play [a song or artist]" (plays the first match once you've connected Spotify)
 
@@ -123,20 +123,20 @@ Everyday questions like "what's 2 plus 2" just stream back with no tools at all.
 
 ### Tray menu
 
-Click `clawd` in the Mac menu bar for these:
+Click the Drizzle cloud icon in the Mac menu bar for these:
 
-- **Reset conversation**, wipes what Clawd remembers from the current chat
+- **Reset conversation**, wipes what Drizzle remembers from the current chat
 - **Size**, small, medium, large, or huge
 - **Move to monitor**, pick which display he lives on
 - **Connect Spotify** / **Disconnect Spotify**
-- **Launch at login**, a checkbox to start Clawd whenever you log in
-- **Quit Clawd**
+- **Launch at login**, a checkbox to start Drizzle whenever you log in
+- **Quit Drizzle**
 
-### When Clawd sleeps
+### When Drizzle sleeps
 
-After about three minutes with no chatting, Clawd nods off. His eyes close, he stops walking, and little `z`s float up from his head. Click him or send a message and he wakes up right away.
+After about three minutes with no chatting, Drizzle nods off. His eyes close, he stops walking, and little `z`s float up from his head. Click him or send a message and he wakes up right away.
 
-## Updating Clawd
+## Updating Drizzle
 
 If you installed the `.dmg`, just download the newest one from the [Releases page](https://github.com/bournechoi4353/ClaudeBuddy/releases) and drag it over the old one. Right click and Open the first time, since the new build's signature changed.
 
@@ -154,39 +154,47 @@ Windows:
 irm https://raw.githubusercontent.com/bournechoi4353/ClaudeBuddy/main/install.ps1 | iex
 ```
 
-## Uninstalling Clawd
+## Uninstalling Drizzle
 
 Mac:
 
 ```bash
+pkill -f Drizzle.app 2>/dev/null
 pkill -f Clawd.app 2>/dev/null
-rm -rf /Applications/Clawd.app
+rm -rf /Applications/Drizzle.app /Applications/Clawd.app
+rm -rf "$HOME/Library/Application Support/Drizzle"
 rm -rf "$HOME/Library/Application Support/Clawd"
 rm -rf "$HOME/Library/Application Support/Clawd-src"
 tccutil reset ScreenCapture dev.clawd.app 2>/dev/null
+osascript -e 'tell application "System Events" to delete login item "Drizzle"' 2>/dev/null
 osascript -e 'tell application "System Events" to delete login item "Clawd"' 2>/dev/null
 ```
 
-Windows: open **Settings**, then **Apps**, then **Installed apps**, find **Clawd**, and click **Uninstall**.
+The `Clawd` entries are what older installs were called. The app id stays `dev.clawd.app` and the source folder stays `Clawd-src`, so permissions and updates carry over from the old name.
+
+Windows: open **Settings**, then **Apps**, then **Installed apps**, find **Drizzle**, and click **Uninstall**.
 
 Or by hand in PowerShell:
 
 ```powershell
 $src = "$env:LOCALAPPDATA\Clawd-src"
-# Clawd runs as electron.exe out of $src, so stop it by path and leave other Electron apps alone
+# Drizzle runs as electron.exe out of $src, so stop it by path and leave other Electron apps alone
 Get-Process electron -ErrorAction SilentlyContinue |
   Where-Object { $_.Path -and $_.Path.StartsWith($src) } | Stop-Process -Force
 Remove-Item $src -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:APPDATA\Drizzle" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:APPDATA\Clawd" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Drizzle.lnk" -ErrorAction SilentlyContinue
 Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clawd.lnk" -ErrorAction SilentlyContinue
+Remove-Item "$([Environment]::GetFolderPath('Desktop'))\Drizzle.lnk" -ErrorAction SilentlyContinue
 Remove-Item "$([Environment]::GetFolderPath('Desktop'))\Clawd.lnk" -ErrorAction SilentlyContinue
 ```
 
 ## What's different on Windows
 
-Most of Clawd works the same on both systems: chatting, web search, weather, timers, clipboard, screen and window capture, app switch reactions, battery warnings, Gmail and Google Drive and Docs, and Spotify.
+Most of Drizzle works the same on both systems: chatting, web search, weather, timers, clipboard, screen and window capture, app switch reactions, battery warnings, Gmail and Google Drive and Docs, and Spotify.
 
-A handful of features lean on Apple specific scripting, so on Windows they politely tell you they're Mac only instead of breaking: Apple Calendar, Apple Notes, Apple Mail, and reading a browser tab directly. On Windows you can connect Google for email, and ask Clawd to "search the web" or "look at my screen" for the rest. Spotify on Windows runs through the Spotify Web API, which needs Premium and the desktop app open once so it shows up as a device.
+A handful of features lean on Apple specific scripting, so on Windows they politely tell you they're Mac only instead of breaking: Apple Calendar, Apple Notes, Apple Mail, and reading a browser tab directly. On Windows you can connect Google for email, and ask Drizzle to "search the web" or "look at my screen" for the rest. Spotify on Windows runs through the Spotify Web API, which needs Premium and the desktop app open once so it shows up as a device.
 
 ## For developers
 
@@ -198,7 +206,7 @@ cd ClaudeBuddy
 npm install
 npm run setup-signing   # Mac only, sets up the self signed cert
 npm start               # dev mode with hot file loading
-npm run pack            # build Clawd.app into dist/mac-arm64/
+npm run pack            # build Drizzle.app into dist/mac-arm64/
 npm run dist            # build the .dmg into dist/
 npm run dist:win        # build a Windows installer into dist/ (run this on Windows)
 ```
@@ -210,12 +218,12 @@ How the project is laid out:
 - `main.js`, the Electron main process: windows, tray, IPC, the app switch watcher.
 - `preload.js`, the secure bridge between the renderer and main.
 - `agent.js`, wraps the Claude Agent SDK and handles subscription auth.
-- `tools.js`, the tools Clawd can call (time, foreground window, screen capture, Spotify, and more).
+- `tools.js`, the tools Drizzle can call (time, foreground window, screen capture, Spotify, and more).
 - `platform.js`, small cross platform helpers (foreground app and battery: AppleScript on Mac, PowerShell on Windows).
 - `spotify-auth.js`, the OAuth with PKCE flow for connecting Spotify.
 - `renderer/crab.js`, the pixel crab itself: drawing, animation, accessories.
 - `renderer/chat.js`, the chat panel.
-- `scripts/generate-icon.js`, a pure JS PNG encoder that draws the crab into `build/icon.png`.
+- `scripts/generate-icon.js`, a pure JS PNG encoder that draws the Drizzle cloud into `build/icon.png` and `build/icon.ico`. `scripts/generate-tray-icon.js` does the same for the menu bar icon.
 - `scripts/setup-self-signed.sh`, creates and trusts the self signed signing cert.
 
 For deeper notes on how everything fits together, see [CLAUDE.md](CLAUDE.md).
