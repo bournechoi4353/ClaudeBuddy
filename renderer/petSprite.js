@@ -182,7 +182,14 @@
 
   function startCycle() {
     if (!ready || cycle) return;
-    cycle = { entries: Object.keys(meta.poses).map((name) => ({ name, mirrored: false })), index: 0, startedAt: 0, timer: null };
+    // Every pose in sheet order. The directional poses (drawn facing right) are shown a second time mirrored,
+    // which is how they look when the pet faces left.
+    const entries = [];
+    for (const name of Object.keys(meta.poses)) {
+      entries.push({ name, mirrored: false });
+      if (meta.facing.directionalPoses.includes(name)) entries.push({ name, mirrored: true });
+    }
+    cycle = { entries, index: 0, startedAt: 0, timer: null };
     const show = () => {
       const entry = cycle.entries[cycle.index];
       cycle.startedAt = performance.now();

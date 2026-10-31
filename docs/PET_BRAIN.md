@@ -71,7 +71,10 @@ Files:
 | `scripts/measure-pet-brain.js` | Feeds 500 synthetic events through the real model and writes `docs/PET_BRAIN_METRICS.md`. |
 | `scripts/electron-model-check.js` | Loads the model inside real Electron main, to check the native module works there. |
 | `renderer/petSprite.js` | Draws the raincloud and shows bubbles. Inert unless the page was loaded with `?petbrain=1`. |
-| `renderer/raincloud/` | The sprite sheet, its manifest and its small player. |
+| `renderer/raincloud/` | The v2 sprite sheet (`raincloud_v2.png`, `@4x`), its manifest and its player. See "Drizzle sprite (v2)". |
+| `scripts/build_raincloud_v2.py` | Regenerates the sheet and the default manifest. Needs Pillow. Not part of the app. |
+| `scripts/merge-raincloud-manifest.js` | Puts the app's own `reactions` and `ambientReactions` into a freshly built manifest. |
+| `test/raincloudV2/` | The offline tests that shipped with the v2 sheet, run by `test/raincloudV2.test.js`. |
 
 ### Signals
 
@@ -118,7 +121,7 @@ Claude is never called for an ambient line either. `test/router.test.js` enforce
 
 The sprite follows the rules' live reaction, changing pose at most every 10 seconds (events change it at once). While a bubble is up, its reaction's pose is held for 8 seconds. While the pet is asleep the pose is `sleepy`. A weather pose replaces the pose only for ambient reactions (`short_idle`, `music_paused`, `video_watching`, `game_time`, `chat_chatter`, and `idle`, which is what the sprite uses when no reaction is active). It never replaces `stuck`, `celebrate`, `error_spotted` or any other event reaction.
 
-Final reaction to pose map (from `renderer/raincloud/raincloud.json`):
+Final reaction to pose map (from `renderer/raincloud/raincloud_v2.json`):
 
 | Reaction | Pose | Reaction | Pose |
 |---|---|---|---|
@@ -135,6 +138,34 @@ Final reaction to pose map (from `renderer/raincloud/raincloud.json`):
 | greeting | hello | deep_work_streak | focus |
 | goodnight | sleepy | morning_start | hello |
 
+## Drizzle sprite (v2)
+
+The sheet is `renderer/raincloud/raincloud_v2.png` (and `raincloud_v2@4x.png`): 96 by 448 px, 6 columns by 28 rows of 16 px frames, one pose per row. Each pose has its own frame count in the manifest (`frames`, default 4), so nothing may assume a global count. Every loop has 4 frames of real motion. `turn` has 5 frames and `look` has 6, and those two play once (`loop: false`) and hold their last frame.
+
+**The 28 poses** (frames at fps):
+
+- Reaction poses: `idle` (4 at 4), `drizzle` (4 at 5), `sunbreak` (4 at 4), `storm` (4 at 8), `sleepy` (4 at 2.5), `dizzy` (4 at 6), `music` (4 at 5), `focus` (4 at 6), `water` (4 at 4), `fade` (4 at 2), `hello` (4 at 5).
+- Weather poses: `wx_clear_day`, `wx_clear_night`, `wx_partly`, `wx_overcast`, `wx_fog`, `wx_drizzle`, `wx_rain`, `wx_snow`, `wx_thunder`, `wx_windy`, `wx_hot`, `wx_cold` (all 4 frames, 2 to 8 fps).
+- Motion poses: `idle_side` (4 at 4, the resting pose), `move` (4 at 8), `blink` (idle with the eyes shut, 4 at 4), `turn` (5 at 22, once), `look` (6 at 4, once, a glance right then left).
+
+**Facing convention.** Directional poses (`move`, `idle_side`, listed in `facing.directionalPoses`) are drawn facing right. Facing left is a horizontal mirror at draw time with a +1 sprite pixel offset (`facing.mirrorOffsetPx`). Always draw through `pet.drawFrame(ctx, pose, frame, x, y, scale, mirrored)`, which applies the mirror and the offset. `turn` runs from left-facing to right-facing, and runs backwards for right to left.
+
+**How the app uses it** (`renderer/petSprite.js`): poses come from `pet.poseFor(reaction, weatherPose)` and frames from `pet.frameAt`. The player's walker supplies blinks, glances, the rest pose and the facing; `crab.js` supplies the movement. Priority, highest first: asleep, dragging, a bubble's pose, then the walker (turn, move, live reaction while still, rest, idle). Drawing is nearest neighbor on the sprite pixel grid, with `image-rendering: pixelated` on the canvas.
+
+**Regenerating the sheet.** `scripts/build_raincloud_v2.py` draws the whole sheet in code and needs Pillow (`python3 -m pip install pillow`). Pillow is not an app dependency, and these steps were not run while integrating, because Pillow was not installed on the machine used. It writes into the current folder, including a manifest with the default reaction names, which are not the app's, so the manifest must go through the merge script:
+
+```
+REPO=/path/to/ClaudeBuddy
+mkdir -p /tmp/drizzle-build && cd /tmp/drizzle-build
+python3 "$REPO/scripts/build_raincloud_v2.py"
+node "$REPO/scripts/merge-raincloud-manifest.js" raincloud_v2.json "$REPO/renderer/raincloud/raincloud_v2.json" "$REPO/renderer/raincloud/raincloud_v2.json"
+cp raincloud_v2.png "raincloud_v2@4x.png" "$REPO/renderer/raincloud/"
+```
+
+`preview_v2.png`, also written, is a contact sheet for looking at the result. Then run `npm test`.
+
+**Screenshots** (`docs/screenshots/`). Transparent PNGs taken from the running app (`PET_BRAIN_LOCAL=1`, Size Small, so 3 screen pixels per sprite pixel), each at 8 image pixels per screen pixel: `idle.png`, `move-right.png`, `move-left.png` (the mirrored sprite), `turn-mid.png` (turn frame 3 of 5), `turn-end.png` (the last turn frame), and three reaction poses held by a bubble: `celebrate.png` (sunbreak), `error.png` (storm) and `music.png`. When facing left the speed-line trail of `move` lands one sprite pixel past the 16 pixel frame, on the right; the cloud itself stays in the same columns either way.
+
 ## Editing lines
 
 Edit `vendor/pet-brain/canned.json`. It maps each reaction name to an array of lines.
@@ -149,16 +180,16 @@ To reset what has been shown, use **Reset line history** in Preferences.
 
 1. Add the name to `REACTIONS` and the rule that returns it to `reactionFor()` in `vendor/pet-brain/rules.js`. This edits a vendored file, so note the change in the file header.
 2. Add at least 5 lines under that name in `canned.json`.
-3. Map it to a pose in `renderer/raincloud/raincloud.json` under `reactions`.
+3. Map it to a pose in `renderer/raincloud/raincloud_v2.json` under `reactions`.
 4. Add a cooldown for it in `pet/config.js` (`cooldownMs`). Without one it uses the 30 minute default.
 5. `npm test` fails until steps 2 and 3 are done, which is the point.
 
 ## Adding a pose
 
-1. Add a row to `renderer/raincloud/raincloud.png` (16 px frames, 2 frames per row, 32 px wide) and the matching row to `raincloud@4x.png` (64 px frames).
-2. Add the pose to `poses` in `raincloud.json` with the next `row` number and an `fps`.
-3. Point reactions at it, or add it to the weather list in `vendor/pet-brain/weather.js`.
-4. Update the row count expected in `test/petSprite.test.js` (`Math.max(...rows) + 1`). The debug cycler picks the new pose up automatically.
+1. Add the pose's frames to `scripts/build_raincloud_v2.py` (16 px frames, drawn facing right if it is directional) and regenerate the sheet and its @4x copy as described in "Drizzle sprite (v2)". If it has more than 6 frames, raise `COLS`, which also changes the sheet width the tests expect.
+2. Make sure its manifest entry has the next `row`, its own `frames` and an `fps`, and `loop: false` if it should play once. If it is directional, add it to `facing.directionalPoses`.
+3. Point reactions at it in `reactions`, or add it to the weather list in `vendor/pet-brain/weather.js` (a vendored file, so note the change in its header).
+4. Run `npm test`. `test/poseNames.test.js` fails if any name the app uses is missing from the sheet. Update the row count (28) in `test/petSprite.test.js` and `test/raincloudV2/test_weather.js`. The debug cycler picks the new pose up automatically.
 
 ## Smart lines (local model, opt-in)
 
@@ -255,6 +286,13 @@ Choices made on the owner's behalf while building this, so they can be reviewed 
 39. **Who wins, in order:** asleep (sleepy pose), dragging (move pose), a bubble's pose (front-on, even while walking), then the walker: turn, move, the live reaction (only while standing still), the rest pose, and finally idle with blinks and glances. The live reaction does not show while walking, because the player's walker is built that way; a bubble's pose does.
 40. **Reduce animation.** The app had no such setting and did not follow the system one, so a "Reduce animation" checkbox was added under Pet brain (`petReduceMotion`). Until it is touched the system setting (`prefers-reduced-motion`) decides, followed live; an explicit choice wins. When it is on: the walker is made with `reducedMotion: true`, every pose is drawn on its first frame, the pet stays where it is instead of roaming (dragging and throwing still work), and the stretch bob, listening sway and dance bounce are off. Because the app owns the position, "teleports" is read as "does not glide": the pet does not roam at all. Event hops and the hover lift are short and tied to something you did, so they were left alone.
 41. **Hidden window.** The draw loop stops while the page is hidden and starts again when it is shown (raincloud only; the crab's loop is untouched). Chromium already throttles hidden pages and this window is not hidden in normal use, so this is a guard, not a measured saving.
+42. **v1 removed.** After the player swap nothing referenced them, so `raincloud.png`, `raincloud@4x.png`, `raincloud.json` and `raincloud.js` were deleted from `renderer/raincloud/`. Nothing else was deleted, and `~/Library/Application Support/Clawd/` was not touched. Decision 3 above is history for the v1 sheet.
+43. **The supplied tests run in the suite.** `test_v2.mjs` and `test_weather.js` are in `test/raincloudV2/` with only their file paths changed, plus one change in `test_weather.js` so it exports its promise (a failure reaches the test runner instead of calling `process.exit`). `test/raincloudV2.test.js` runs both, offline. `test/poseNames.test.js` checks every pose name the app uses (the reaction map, everything the weather lookup can return across all weather codes, day and night, temperatures and winds, any `wx_` name written in the sources, and the facing, blink and glance poses) against the merged manifest. Renaming one pose in the manifest was confirmed to fail four tests.
+44. **Weather.** `vendor/pet-brain/weather.js` is byte-identical to the supplied copy and was not touched. Every pose it can return exists in the sheet, and weather poses still replace only the ambient reactions (a stuck, celebrate or error pose keeps its own).
+45. **Cycler.** The hidden cycler walks all 28 poses with their frame counts, shows `move` and `idle_side` a second time mirrored, and plays `turn` and `look` once, then holds their last frame.
+46. **Packaging checked.** A packed build (`electron-builder --mac --dir`, unsigned, built into a scratch folder) contains `raincloud_v2.png`, `raincloud_v2@4x.png`, `raincloud_v2.json` and `raincloud_v2.js` inside `app.asar` and none of the v1 files, so decision 31 held and no config change was needed. The packed app was not launched in this check.
+47. **Visual check method.** The app was launched with `PET_BRAIN_LOCAL=1` and a local debug port. For each screenshot the pet was put in the state, the animation loop was frozen on the exact frame wanted, and the page was captured with a transparent background. Each capture was then compared with the sheet cell by cell. Result for all 8 captures: 0 cells that are not one flat color (so no blur and no shimmer) and 0 cells that differ from the sheet, including the mirrored `move-left`, which matches the sheet flipped with the +1 offset exactly. The cloud body is in the same columns facing either way (2 to 14 across its top rows), so there is no one pixel jump when it turns; only the speed-line trail moves, from one side of the frame to one pixel past the other. A normal screen capture of the live window was also looked at once and showed the same crisp result. The system reduce-motion setting was off on this machine, so the live follow of that setting was tested with stand-ins only.
+48. **The sheet build script was not run.** `scripts/build_raincloud_v2.py` is an unchanged copy of the supplied one. Pillow is not installed on this machine and installing it was not part of the job, so the regeneration steps in this document are untested.
 
 ## Known gaps
 
@@ -269,3 +307,8 @@ Choices made on the owner's behalf while building this, so they can be reviewed 
 - Smart lines quality: guard-passing lines can still be odd (about 29 percent of a 48-line manual sample), and the package's own blind comparison found the built-in bank wins. The guards check rules, not wit.
 - Three failures in a row switch the model off for that session's brain. A failure here is a timeout, a thrown error or an invalid line. Toggling Smart lines or pressing Reset line history starts it fresh.
 - Smart lines is untested on Windows and Intel Macs, and the packaging notes above list what is unverified.
+- Drizzle v2: the sheet build and the steps to regenerate it were not run (no Pillow here). The visual check ran on macOS at Size Small only; Windows and the larger sizes were not looked at, though the drawing path is the same.
+- Reduce animation also stops the pet roaming and turns off the stretch bob, sway and dance bounce. That goes a little past what the player's own reduced mode does, and event hops are still allowed. Following the system setting live was tested with stand-ins, not by toggling the real system setting.
+- Facing left, the speed-line trail of `move` sits one sprite pixel past the pet's 16 pixel box. At the very right edge of the window that pixel is clipped.
+- The pause while hidden is a guard and was not measured, since the window is not hidden in normal use.
+- Walking speed is per frame, as before, so on a 120 Hz display the pet walks twice as fast as on a 60 Hz one. The facing logic is unaffected.

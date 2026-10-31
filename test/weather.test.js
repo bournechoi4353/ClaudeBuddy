@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { poseFor, createWeatherSource, geocode, MIN_REFRESH_MS } = require('../vendor/pet-brain/weather.js');
-const meta = require('../renderer/raincloud/raincloud.json');
+const meta = require('../renderer/raincloud/raincloud_v2.json');
 
 const MIN = 60 * 1000;
 
@@ -83,7 +83,7 @@ test('geocode returns rounded coordinates and a readable label', async () => {
 });
 
 test('weather poses replace only ambient reactions, never event reactions', async () => {
-  const { createRaincloud } = await import(pathToFileURL(path.join(__dirname, '..', 'renderer', 'raincloud', 'raincloud.js')).href);
+  const { createRaincloud } = await import(pathToFileURL(path.join(__dirname, '..', 'renderer', 'raincloud', 'raincloud_v2.js')).href);
   const cloud = createRaincloud(meta, {});
   // Ambient: the weather pose wins.
   for (const reaction of ['short_idle', 'music_paused', 'video_watching', 'game_time', 'chat_chatter', 'idle']) {

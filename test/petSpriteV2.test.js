@@ -153,9 +153,16 @@ test('every pose plays within its own frame count, loops wrap and one-shots hold
   const { sprite, timers, thoughts, drawAt, jump } = await setup();
   sprite.startPoseCycle();
   const seen = [];
-  for (let i = 0; i < poseNames.length; i += 1) {
+  // Every pose once, and the two directional poses a second time mirrored, straight after their normal entry.
+  const expected = [];
+  for (const name of poseNames) {
+    expected.push(name);
+    if (meta.facing.directionalPoses.includes(name)) expected.push(`${name} (mirrored)`);
+  }
+  for (let i = 0; i < expected.length; i += 1) {
     const label = thoughts[thoughts.length - 1].text;
     const name = label.match(/^pose: (\S+) /)[1];
+    const mirrored = /, mirrored\)$/.test(label);
     const frames = meta.poses[name].frames || meta.frameCount;
     assert.ok(label.includes(`(${frames} frames`), `${label} shows its frame count`);
     const startedAt = i * 10000;
@@ -163,6 +170,7 @@ test('every pose plays within its own frame count, loops wrap and one-shots hold
     for (let t = 0; t <= 4000; t += 40) {
       const d = drawAt(startedAt + t);
       assert.strictEqual(d.pose, name);
+      assert.strictEqual(d.mirrored, mirrored, `${label} is drawn ${mirrored ? 'mirrored' : 'as it is on the sheet'}`);
       assert.ok(d.frame >= 0 && d.frame < frames, `${name} frame ${d.frame} is inside ${frames}`);
       shown.add(d.frame);
     }
@@ -172,11 +180,12 @@ test('every pose plays within its own frame count, loops wrap and one-shots hold
     } else {
       assert.strictEqual(shown.size, frames, `${name} shows all ${frames} frames`);
     }
-    seen.push(name);
+    seen.push(mirrored ? `${name} (mirrored)` : name);
     jump((i + 1) * 10000);
     timers[timers.length - 1].fn(); // the cycler moves to the next pose
   }
-  assert.deepStrictEqual(seen, poseNames, 'visits every pose in the sheet once');
+  assert.deepStrictEqual(seen, expected, 'visits every pose in the sheet, with the facing poses also mirrored');
+  assert.strictEqual(seen.length, poseNames.length + 2);
   sprite.stopPoseCycle();
 });
 
