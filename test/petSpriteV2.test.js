@@ -192,3 +192,169 @@ test('drawing is nearest neighbor on the sprite pixel grid', async () => {
   assert.strictEqual(rec.ctx.imageSmoothingEnabled, false);
   assert.strictEqual(sprite.sizeFor(scale), 16 * k);
 });
+
+// ---- Facing, turning, dragging and reduced motion ----
+
+const SPEED = 0.5; // the crab's default step in px per frame
+
+// Run the sprite one frame at a time, as the animation loop would, moving it by vx px per frame.
+function walk(ctxHolder, { from, ms, vx, opts = {}, x0 = 400 }) {
+  const out = [];
+  let x = x0;
+  for (let t = from + FRAME_MS; t <= from + ms; t += FRAME_MS) {
+    x += vx;
+    out.push({ t, ...ctxHolder.drawAt(t, { ...opts, vx }, x) });
+  }
+  return out;
+}
+
+test('moving right shows the move pose facing right, with no mirror', async () => {
+  const s = await setup();
+  s.drawAt(0);
+  const frames = walk(s, { from: 0, ms: 1000, vx: SPEED });
+  const last = frames[frames.length - 1];
+  assert.strictEqual(last.pose, 'move');
+  assert.strictEqual(last.mirrored, false);
+});
+
+test('moving left plays the turn, then shows the move pose mirrored', async () => {
+  const s = await setup();
+  s.drawAt(0);
+  walk(s, { from: 0, ms: 600, vx: SPEED }); // heading right first
+  const frames = walk(s, { from: 600, ms: 1200, vx: -SPEED });
+  const poses = frames.map((f) => f.pose);
+  assert.ok(poses.includes('turn'), 'the turn animation plays when the direction reverses');
+  assert.ok(poses.indexOf('turn') < poses.lastIndexOf('move'), 'the turn comes before the new move');
+  const last = frames[frames.length - 1];
+  assert.strictEqual(last.pose, 'move');
+  assert.strictEqual(last.mirrored, true, 'facing left is the mirrored sprite');
+});
+
+test('reversing mid-turn never snaps: the turn frame moves one step at a time', async () => {
+  const s = await setup();
+  s.drawAt(0);
+  walk(s, { from: 0, ms: 600, vx: SPEED });
+  const turnSeq = [];
+  let t = 600;
+  const flips = [-SPEED, -SPEED, -SPEED, SPEED, SPEED, SPEED, -SPEED, -SPEED, -SPEED, -SPEED, -SPEED, -SPEED, -SPEED];
+  for (const vx of flips) {
+    t += FRAME_MS;
+    const d = s.drawAt(t, { vx }, 400);
+    if (d.pose === 'turn') turnSeq.push(d.frame);
+  }
+  assert.ok(turnSeq.length >= 3, 'the turn was playing');
+  for (let i = 1; i < turnSeq.length; i += 1) {
+    assert.ok(Math.abs(turnSeq[i] - turnSeq[i - 1]) <= 1, `turn frames ${turnSeq[i - 1]} then ${turnSeq[i]} do not jump`);
+  }
+});
+
+test('when it stops it rests side-on facing the way it was going, then goes back to idle', async () => {
+  const s = await setup();
+  s.drawAt(0);
+  walk(s, { from: 0, ms: 600, vx: SPEED });
+  walk(s, { from: 600, ms: 1200, vx: -SPEED }); // now facing left
+  const settled = s.drawAt(1800 + 300, { vx: 0 });
+  assert.strictEqual(settled.pose, 'idle_side');
+  assert.strictEqual(settled.mirrored, true, 'still facing left');
+  assert.strictEqual(s.drawAt(1800 + 2200, { vx: 0 }).pose, 'idle', 'after a moment, the front-on idle');
+});
+
+test('a reaction pose shows when the pet stands still but not while it walks, and a bubble shows either way', async () => {
+  const s = await setup();
+  s.sprite.setLive('celebrate');
+  s.drawAt(0);
+  assert.strictEqual(walk(s, { from: 0, ms: 600, vx: SPEED }).pop().pose, 'move', 'walking, the pose is the move pose');
+  assert.strictEqual(s.drawAt(1500, { vx: 0 }).pose, 'sunbreak', 'standing, the reaction shows');
+  s.sprite.hold('error_spotted');
+  assert.strictEqual(walk(s, { from: 1500, ms: 300, vx: SPEED }).pop().pose, 'storm', 'a bubble shows even while walking');
+});
+
+test('dragging shows the move pose facing the drag, even when the cursor pauses, and rests on release', async () => {
+  const s = await setup();
+  s.drawAt(0);
+  walk(s, { from: 0, ms: 600, vx: -3, opts: { dragging: true } }); // dragged left
+  const paused = s.drawAt(700, { dragging: true, vx: 0 });
+  assert.strictEqual(paused.pose, 'move', 'the move pose while held, even with no motion');
+  assert.strictEqual(paused.mirrored, true, 'facing the way it was dragged');
+  const moving = walk(s, { from: 700, ms: 400, vx: 3, opts: { dragging: true } });
+  assert.ok(moving.some((f) => f.pose === 'turn') || moving[moving.length - 1].mirrored === false, 'dragging the other way turns it around');
+  assert.strictEqual(moving[moving.length - 1].pose, 'move');
+  assert.strictEqual(moving[moving.length - 1].mirrored, false);
+
+  const released = s.drawAt(1100 + 300, { dragging: false, vx: 0 });
+  assert.strictEqual(released.pose, 'idle_side', 'on release it goes to the rest pose');
+  assert.strictEqual(s.drawAt(1100 + 2200, { vx: 0 }).pose, 'idle', 'then idle');
+});
+
+test('facing left is the mirror with the manifest offset, at the same grid position as facing right', async () => {
+  const k = 5; // Size 6 gives 5 screen pixels per sprite pixel
+  const still = async (vx) => {
+    const s = await setup();
+    s.drawAt(0);
+    if (vx < 0) for (let t = FRAME_MS; t <= 600; t += FRAME_MS) s.drawAt(t, { vx: -vx }, 400); // face right first
+    let last = null;
+    for (let t = 600 + FRAME_MS; t <= 1800; t += FRAME_MS) last = s.drawAt(t, { vx }, 400); // the pet itself stays at x 400
+    return last;
+  };
+  const right = await still(SPEED);
+  const left = await still(-SPEED);
+  assert.strictEqual(right.pose, 'move');
+  assert.strictEqual(left.pose, 'move');
+  assert.strictEqual(right.mirrored, false);
+  assert.strictEqual(left.mirrored, true);
+  assert.strictEqual(right.x, 400, 'facing right is drawn at the grid position');
+  // The mirrored draw is translated by the frame width plus the manifest offset, so its silhouette
+  // covers the same columns the sheet was built for.
+  assert.strictEqual(meta.facing.mirrorOffsetPx, 1);
+  assert.strictEqual(left.x, 400 + (16 + meta.facing.mirrorOffsetPx) * k);
+  assert.strictEqual(left.size, right.size);
+});
+
+test('reduced motion: still poses, no walking poses, and the setting can be flipped live', async () => {
+  const s = await setup();
+  s.sprite.setReducedMotionPref(true);
+  assert.strictEqual(s.sprite.reducedMotion(), true);
+  s.drawAt(0);
+  const frames = walk(s, { from: 0, ms: 800, vx: SPEED });
+  for (const f of frames) {
+    assert.ok(f.pose !== 'move' && f.pose !== 'turn', `${f.pose} is not a moving pose`);
+    assert.strictEqual(f.frame, 0, 'always the first frame');
+    assert.strictEqual(f.mirrored, false);
+  }
+  s.sprite.setLive('celebrate');
+  const reaction = s.drawAt(1500, { vx: 0 });
+  assert.strictEqual(reaction.pose, 'sunbreak');
+  assert.strictEqual(reaction.frame, 0, 'even a reaction pose holds still');
+
+  s.sprite.setReducedMotionPref(false);
+  assert.strictEqual(s.sprite.reducedMotion(), false);
+  assert.strictEqual(walk(s, { from: 1500, ms: 600, vx: SPEED }).pop().pose, 'move', 'back to normal at once');
+});
+
+test('reduced motion follows the system setting until a choice is made', async () => {
+  const listeners = [];
+  const query = { matches: true, addEventListener: (type, cb) => listeners.push(cb) };
+  const s = await setup({ extra: { matchMedia: () => query } });
+  assert.strictEqual(s.sprite.reducedMotion(), true, 'the system says reduce');
+  query.matches = false;
+  listeners.forEach((cb) => cb({ matches: false }));
+  assert.strictEqual(s.sprite.reducedMotion(), false, 'follows the system when it changes');
+  s.sprite.setReducedMotionPref(true);
+  listeners.forEach((cb) => cb({ matches: false }));
+  assert.strictEqual(s.sprite.reducedMotion(), true, 'an explicit choice wins over the system');
+  s.sprite.setReducedMotionPref(null);
+  assert.strictEqual(s.sprite.reducedMotion(), false, 'clearing the choice goes back to the system');
+});
+
+test('the saved preference reaches the sprite from the prefs the app sends', async () => {
+  let onPrefs = null;
+  const s = await setup({
+    extra: { crabAPI: { getPrefs: () => Promise.resolve({ petReduceMotion: true }), onPrefsUpdated: (cb) => { onPrefs = cb; } } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.strictEqual(s.sprite.reducedMotion(), true, 'the saved value is read at start');
+  onPrefs({ petReduceMotion: false });
+  assert.strictEqual(s.sprite.reducedMotion(), false, 'a change in Preferences applies live');
+  onPrefs({ skin: 'royal' });
+  assert.strictEqual(s.sprite.reducedMotion(), false, 'unrelated changes leave it alone');
+});

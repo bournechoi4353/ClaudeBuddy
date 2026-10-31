@@ -88,6 +88,14 @@
       window.crabAPI.setPref({ petChattiness: petChattiness.value });
     });
 
+    // Reduce animation: shows the system's setting until the user picks a side, then keeps their choice.
+    const petReduce = $('petReduce');
+    const systemReduces = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    petReduce.checked = typeof prefs.petReduceMotion === 'boolean' ? prefs.petReduceMotion : systemReduces;
+    petReduce.addEventListener('change', () => {
+      window.crabAPI.setPref({ petReduceMotion: petReduce.checked });
+    });
+
     // Smart lines: local model, off by default. The status line comes from the main process.
     const smart = $('petSmart');
     const modelPath = $('petModelPath');

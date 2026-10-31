@@ -27,6 +27,7 @@ function sanitizePetUpdates(updates) {
   const out = { ...updates };
   if ('petBrainEnabled' in out) out.petBrainEnabled = out.petBrainEnabled === true;
   if ('petChattiness' in out && !CHATTINESS_LEVELS.includes(out.petChattiness)) delete out.petChattiness;
+  if ('petReduceMotion' in out) out.petReduceMotion = out.petReduceMotion === true;
   if ('petWeatherEnabled' in out) out.petWeatherEnabled = out.petWeatherEnabled === true;
   if ('petSmartLines' in out) out.petSmartLines = out.petSmartLines === true;
   if ('petModelPath' in out) {

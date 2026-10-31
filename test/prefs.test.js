@@ -59,3 +59,10 @@ test('the model path is a trimmed string of sane length, or dropped', () => {
     assert.ok(!('petModelPath' in sanitizePetUpdates({ petModelPath: bad })), JSON.stringify(bad).slice(0, 30));
   }
 });
+
+test('reduce animation is a strict boolean', () => {
+  assert.strictEqual(sanitizePetUpdates({ petReduceMotion: true }).petReduceMotion, true);
+  assert.strictEqual(sanitizePetUpdates({ petReduceMotion: false }).petReduceMotion, false);
+  assert.strictEqual(sanitizePetUpdates({ petReduceMotion: 'on' }).petReduceMotion, false);
+  assert.ok(!('petReduceMotion' in sanitizePetUpdates({ petChattiness: 'low' })), 'absent stays absent, so the system setting decides');
+});

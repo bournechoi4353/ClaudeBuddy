@@ -657,9 +657,12 @@ function draw() {
   const moving = stateIsMoving() && !externallyPaused && !isSleeping;
   const bob = moving && (walkFrame === 0 || walkFrame === 2) ? -1 : 0;
 
+  // Reduce animation (raincloud only): no stretch bob, listening sway or dance bounce.
+  const still = petSpriteWanted() && window.PetSprite.reducedMotion();
+
   // Stretch bob: sine-arc up to ~3px during the stretch state.
   let stretchY = 0;
-  if (behaviorState === ST.STRETCH && stateUntil > stateStartedAt) {
+  if (behaviorState === ST.STRETCH && stateUntil > stateStartedAt && !still) {
     const t = (performance.now() - stateStartedAt) / (stateUntil - stateStartedAt);
     if (t > 0 && t < 1) stretchY = -Math.sin(t * Math.PI) * 3;
   }
@@ -680,11 +683,11 @@ function draw() {
   const tNow = performance.now();
   let hoverY = 0, swayX = 0, danceY = 0;
   if (isHovered) hoverY = -2;
-  if (isListening) {
+  if (isListening && !still) {
     const tSec = (tNow - listeningStartAt) / 1000;
     swayX = Math.sin(tSec * 3) * 1.5;
   }
-  if (tNow < danceUntil) {
+  if (tNow < danceUntil && !still) {
     danceY = Math.sin(tNow / 1000 * 2 * Math.PI * 2) * 2.5; // 2 Hz bounce
   }
 
@@ -769,7 +772,16 @@ function draw() {
     accessory = null;
   }
 
-  if (petSpriteWanted()) window.PetSprite.draw(ctx, drawX, drawY, SCALE, { sleeping: isSleeping });
+  if (petSpriteWanted()) {
+    // Sideways speed for the sprite's facing: the step while walking, the drawn change while dragged or thrown.
+    const boxDX = lastBoxX === null ? 0 : bbox.x - lastBoxX;
+    lastBoxX = bbox.x;
+    window.PetSprite.draw(ctx, drawX, drawY, SCALE, {
+      sleeping: isSleeping,
+      dragging: isDragging,
+      vx: (isDragging || isFlying) ? boxDX : petVX,
+    });
+  }
 
   // Z's float on top of everything (drawn last so they're visible even over the body).
   drawZParticles();
@@ -821,7 +833,11 @@ function draw() {
 }
 
 let lastTickAt = performance.now();
+let petVX = 0;        // sideways step this frame in px, read by the raincloud sprite for facing
+let lastBoxX = null;  // the bbox x one frame ago
+let loopPaused = false; // the raincloud loop stops while the window is hidden (see the end of the file)
 function tick() {
+  if (document.hidden && petSpriteWanted()) { loopPaused = true; return; }
   const now = performance.now();
   const dtMs = Math.min(50, now - lastTickAt); // clamp dt so tab-switch returns don't teleport particles
   lastTickAt = now;
@@ -867,20 +883,25 @@ function tick() {
     }
   }
 
+  petVX = 0;
   if (!externallyPaused && !isSleeping) {
     if (now >= stateUntil) pickNextBehavior();
 
-    const speed = stateSpeed();
+    // With Reduce animation on, the raincloud stays put instead of roaming.
+    const speed = petSpriteWanted() && window.PetSprite.reducedMotion() ? 0 : stateSpeed();
     if (speed > 0) {
       posX += dir * speed;
+      petVX = dir * speed;
 
       if (posX + crabW >= canvas.width) {
         posX = canvas.width - crabW;
         dir = -1;
+        petVX = 0;
         setState(ST.BOUNCE_PAUSE, 700);
       } else if (posX <= 0) {
         posX = 0;
         dir = 1;
+        petVX = 0;
         setState(ST.BOUNCE_PAUSE, 700);
       }
 
@@ -1075,5 +1096,17 @@ window.Crab = {
   isOnboarding: () => onboardingActive,
   endOnboarding: () => { onboardingActive = false; },
 };
+
+// Stop drawing while the window is hidden and pick up again when it is shown, so an idle pet costs
+// no CPU. Only registered for the raincloud: the crab's loop is left exactly as it was.
+if (petSpriteWanted()) {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && loopPaused) {
+      loopPaused = false;
+      lastTickAt = performance.now();
+      requestAnimationFrame(tick);
+    }
+  });
+}
 
 tick();
