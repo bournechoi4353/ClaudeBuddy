@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('crabAPI', {
   onNotify: (callback) => {
     ipcRenderer.on('clawd-notify', (_e, info) => callback(info));
   },
-  // Pet brain (only fires when PET_BRAIN_LOCAL=1).
+  // Pet brain (only fires while the pet brain is on, which is the default).
   onPetState: (callback) => {
     ipcRenderer.on('pet-brain-state', (_e, info) => callback(info));
   },

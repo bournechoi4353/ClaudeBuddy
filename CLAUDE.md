@@ -4,7 +4,7 @@ Context for future Claude sessions working on this codebase. End-user docs live 
 
 ## What this is
 
-Drizzle is a transparent always-on-top Electron app on **macOS and Windows**. It draws a small pixel-art pet on the user's screen who can chat, look at the screen, and control Spotify: a raincloud when the pet brain is on (`PET_BRAIN_LOCAL=1`, see [docs/PET_BRAIN.md](docs/PET_BRAIN.md)), the original crab otherwise. The "AI" is the Claude Agent SDK driven by the user's **Claude Pro/Max subscription** (not an API key).
+Drizzle is a transparent always-on-top Electron app on **macOS and Windows**. It draws a small pixel-art pet on the user's screen who can chat, look at the screen, and control Spotify: a raincloud by default (the pet brain, see [docs/PET_BRAIN.md](docs/PET_BRAIN.md)), and the original crab when `PET_BRAIN_LOCAL=0` is set or the Preferences switch is off. The "AI" is the Claude Agent SDK driven by the user's **Claude Pro/Max subscription** (not an API key).
 
 **Naming.** The app was called Clawd until it was renamed Drizzle. The name users see (app bundle, dialogs, tray, installers, docs, data folder) is Drizzle. These internals keep the old name on purpose, because changing them costs something: the app id `dev.clawd.app` (macOS Screen Recording permission and the login item are keyed on it), the signing certificate `Clawd Self-Signed`, the `clawd-*` IPC channel names, the `mcp__clawd__` tool names, and the `Clawd-src` source folder the installers use. On first start `userdata-migration.js` copies `prefs.json` from the old `Clawd` data folder into the new `Drizzle` one (a copy; the old folder is left alone).
 

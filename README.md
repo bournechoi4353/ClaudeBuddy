@@ -4,7 +4,7 @@ https://github.com/user-attachments/assets/b6603a68-3ae0-4098-bf8c-6c0ec1cbfa7f
 
 # Drizzle
 
-Drizzle is a little pixel pet who lives on your desktop, and he's also Claude. He is a raincloud when the pet brain is on (see `docs/PET_BRAIN.md`) and a crab otherwise. Click him and a tiny chat window pops up over his head. He can look at your screen, control Spotify, hop around when you switch apps, doze off when you ignore him, and wander along the bottom of whichever monitor you put him on.
+Drizzle is a little pixel pet who lives on your desktop, and he's also Claude. He is a raincloud, with a small personality of his own (see `docs/PET_BRAIN.md`). Start with `PET_BRAIN_LOCAL=0`, or switch **Pet brain on** off in Preferences, to get the original crab back. Click him and a tiny chat window pops up over his head. He can look at your screen, control Spotify, hop around when you switch apps, doze off when you ignore him, and wander along the bottom of whichever monitor you put him on.
 
 Powered by your Claude Pro or Max subscription via the Claude Agent SDK — **no API key, no per-token billing**.
 

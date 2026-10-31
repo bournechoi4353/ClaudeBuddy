@@ -210,13 +210,15 @@ test('the output carries no content fields', () => {
   assert.ok(!JSON.stringify(s).includes('secret'));
 });
 
-test('flag helpers: off by default, gate needs exactly 1, prefs can switch it off', () => {
-  assert.strictEqual(petBrainGate({}), false);
-  assert.strictEqual(petBrainGate({ PET_BRAIN_LOCAL: '0' }), false);
-  assert.strictEqual(petBrainGate({ PET_BRAIN_LOCAL: 'true' }), false);
+test('flag helpers: on by default, only PET_BRAIN_LOCAL=0 closes the gate, prefs can switch it off', () => {
+  assert.strictEqual(petBrainGate({}), true, 'on with nothing set');
   assert.strictEqual(petBrainGate({ PET_BRAIN_LOCAL: '1' }), true);
-  assert.strictEqual(petBrainActive({}, {}), false);
+  assert.strictEqual(petBrainGate({ PET_BRAIN_LOCAL: 'true' }), true, 'only an exact 0 turns it off');
+  assert.strictEqual(petBrainGate({ PET_BRAIN_LOCAL: '' }), true);
+  assert.strictEqual(petBrainGate({ PET_BRAIN_LOCAL: '0' }), false);
+  assert.strictEqual(petBrainActive({}, {}), true);
   assert.strictEqual(petBrainActive({}, { PET_BRAIN_LOCAL: '1' }), true);
-  assert.strictEqual(petBrainActive({ petBrainEnabled: false }, { PET_BRAIN_LOCAL: '1' }), false);
-  assert.strictEqual(petBrainActive({ petBrainEnabled: true }, {}), false, 'prefs alone never open the gate');
+  assert.strictEqual(petBrainActive({ petBrainEnabled: false }, {}), false, 'the Preferences switch turns it off');
+  assert.strictEqual(petBrainActive({ petBrainEnabled: true }, { PET_BRAIN_LOCAL: '0' }), false, 'the environment wins over prefs');
+  assert.strictEqual(petBrainActive({}, { PET_BRAIN_LOCAL: '0' }), false);
 });

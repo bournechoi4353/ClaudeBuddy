@@ -54,9 +54,9 @@ const tools = require('./tools');
 const platform = require('./platform');
 const { dialog, shell } = require('electron');
 const os = require('os');
-// Pet brain (ml-pet-brain branch): only the flag helper is loaded here. The brain itself
-// is required lazily and only when PET_BRAIN_LOCAL=1, so flag-off startup is unchanged.
-const { petBrainActive, petBrainGate } = require('./pet/flag');
+// Pet brain: on by default (PET_BRAIN_LOCAL=0 turns it off for a run and brings back the crab).
+// Only the flag helper is loaded here. The brain itself is required lazily, and only when active.
+const { petBrainActive, petBrainGate, petBrainDebug } = require('./pet/flag');
 const { sanitizePetUpdates } = require('./pet/prefs');
 
 // When a timer ends, the renderer hops Clawd + shows a thought bubble.
@@ -296,7 +296,7 @@ function maybeShowClaudeOnboarding() {
 let mainWin = null;
 let currentDisplayId = null;
 
-// ---- Pet brain (off unless PET_BRAIN_LOCAL=1) ----
+// ---- Pet brain (on unless PET_BRAIN_LOCAL=0) ----
 let petController = null;
 let petPoseCycle = false;
 
@@ -695,8 +695,8 @@ function buildTrayMenuTemplate() {
     { label: `About ${APP_NAME}`, click: showAbout },
     { type: 'separator' },
     { label: 'Reset conversation', click: () => { agent.reset(); agent.warm().catch(() => {}); } },
-    // Hidden debug item: only present while the pet brain is active.
-    ...(petBrainActive(prefs) ? [{
+    // Debug item: only while the pet brain is active and PET_BRAIN_DEBUG=1, so it is not in everyone's menu.
+    ...(petBrainActive(prefs) && petBrainDebug() ? [{
       label: 'Pet brain: cycle all poses',
       type: 'checkbox',
       checked: petPoseCycle,

@@ -1,6 +1,7 @@
 // Drizzle, the raincloud pet sprite (v2 sheet). Draws the raincloud in place of the crab,
-// but only when main loaded the page with ?petbrain=1, which happens only when the pet
-// brain is active (PET_BRAIN_LOCAL=1). Otherwise this file does nothing.
+// but only when main loaded the page with ?petbrain=1, which happens whenever the pet
+// brain is active (the default; PET_BRAIN_LOCAL=0 or the Preferences switch turns it off).
+// Otherwise this file does nothing and the crab is drawn.
 //
 // Poses come from the sheet's manifest through pet.poseFor(reaction, weatherPose). The player's
 // walker supplies the idle behavior (blinks and glances), the pose for the live reaction while the

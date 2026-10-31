@@ -73,8 +73,14 @@
     window.crabAPI.setPref({ sleepMinutes: parseInt(sleepMin.value, 10) });
   });
 
-  // Pet brain section: main only reports petBrainAvailable when PET_BRAIN_LOCAL=1,
-  // so without the flag this section never appears.
+  // Skin and crab color only apply to the crab, so they are hidden while the raincloud is the pet.
+  const showCrabSettings = (show) => {
+    document.querySelectorAll('.crab-only').forEach((el) => { el.hidden = !show; });
+  };
+  showCrabSettings(!(prefs.petBrainAvailable && prefs.petBrainEnabled !== false));
+
+  // Pet brain section: main reports petBrainAvailable unless PET_BRAIN_LOCAL=0 closed the gate,
+  // so with the gate closed this section never appears and the crab settings stay.
   if (prefs.petBrainAvailable) {
     $('petBrainSection').hidden = false;
     const petOn = $('petBrainOn');
@@ -83,6 +89,7 @@
     petChattiness.value = prefs.petChattiness || 'normal';
     petOn.addEventListener('change', () => {
       window.crabAPI.setPref({ petBrainEnabled: petOn.checked });
+      showCrabSettings(!petOn.checked);
     });
     petChattiness.addEventListener('change', () => {
       window.crabAPI.setPref({ petChattiness: petChattiness.value });

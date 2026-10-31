@@ -1,6 +1,6 @@
 # Pet brain
 
-An optional layer that gives the desktop pet a small personality of its own. It is off by default, lives on the `ml-pet-brain` branch, and when it is off the app behaves exactly as it did before.
+The layer that gives the desktop pet its looks and a small personality of its own: Drizzle, the raincloud. It is on by default. `PET_BRAIN_LOCAL=0` in the environment, or the **Pet brain on** switch in Preferences, turns it off, and then the app is exactly what it was before the pet brain existed, with the original crab.
 
 What it does when on:
 
@@ -17,22 +17,23 @@ Two tiers answer two kinds of thing. The pet's own unprompted lines are tier 1 (
 ## Running it
 
 ```
-PET_BRAIN_LOCAL=1 npm start
+npm start                       # the raincloud, the default
+PET_BRAIN_LOCAL=0 npm start     # the original crab, with no pet brain
 ```
 
-From VS Code's terminal, also strip the inherited variable: `env -u ELECTRON_RUN_AS_NODE PET_BRAIN_LOCAL=1 npm start`.
+From VS Code's terminal, also strip the inherited variable: `env -u ELECTRON_RUN_AS_NODE npm start`.
 
 | Variable | Effect |
 |---|---|
-| `PET_BRAIN_LOCAL=1` | Opens the gate. Off by default, and only the exact value `1` counts. |
+| `PET_BRAIN_LOCAL=0` | Closes the gate for that run: no pet brain, the crab. On by default, and only the exact value `0` closes it. `1` or anything else leaves it open. |
 | `PET_BRAIN_DEBUG=1` | Logs every reaction decision, block reason, pose change and weather pose to the console as `[pet-brain] ...`, and one metrics line per ambient line (source, latency, fallback reason). |
 | `PET_BRAIN_MODEL_PATH=/path/model.gguf` | Where Smart lines looks for the model, unless Preferences sets a path. |
 
-With the gate open, a **Pet brain** section appears in Preferences (master switch, chattiness, reset line history, weather mood). The master switch is a soft off: it lets the user turn the brain off without unsetting the environment variable. Preferences alone can never open the gate.
+With the gate open, a **Pet brain** section appears in Preferences (master switch, chattiness, reduce animation, reset line history, Smart lines, weather mood). The master switch turns the brain, and the cloud, off without an environment variable, which brings the crab back. The environment wins: with `PET_BRAIN_LOCAL=0` the brain stays off whatever Preferences says. While the cloud is the pet, Preferences hides the **Skin** and **Crab color** settings, since they only apply to the crab; they come back when the brain is off.
 
-A packaged app launched by double click has no environment variable, so the gate stays closed. To try a packaged build: `PET_BRAIN_LOCAL=1 open -a Clawd` from a terminal, or `launchctl setenv PET_BRAIN_LOCAL 1` before opening it.
+A packaged app needs nothing set: it starts as the cloud. To see the crab from a packaged build, `open --env PET_BRAIN_LOCAL=0 -a /Applications/Drizzle.app`, or switch **Pet brain on** off in Preferences.
 
-Hidden debug aid: while the brain is active, the tray and right-click menu has **Pet brain: cycle all poses**, which steps through all 23 poses every 2.5 seconds and names each one in the bubble.
+Hidden debug aid: with `PET_BRAIN_DEBUG=1` and the brain active, the tray and right-click menu has **Pet brain: cycle all poses**, which steps through all 28 poses (the two facing poses a second time mirrored) every 2.5 seconds and names each one in the bubble.
 
 ## Architecture
 
@@ -219,7 +220,7 @@ Nothing below was changed. These are what a scratch `electron-builder --mac --di
 - **Notarization.** Not possible today: the app is self-signed, with no Developer ID and no team ID. Notarizing would need Developer ID signing, a secure timestamp and the hardened runtime on all of the nested files above, and the `.so` plugins are the easiest to miss. With a real team ID, library validation requires every loaded library to carry the same team ID or be Apple's, and the entitlements may need `com.apple.security.cs.disable-library-validation` if any file is signed differently. This is untested.
 - **Universal vs arm64.** The current build is arm64 only. `npm install` pulls only the matching `@node-llama-cpp/mac-arm64-metal` package (an optional dependency keyed by CPU), so an x64 or universal build from an arm64 machine would ship **without** an x64 binary. It would need the x64 package installed (for example `npm install --cpu=x64`) or a build per architecture merged with `@electron/universal`, with the native files listed as architecture-specific. Intel Macs use a CPU-only build, which is why `vendor/pet-brain/worker.js` only uses the Metal binary on Apple Silicon. Intel, universal and Windows builds are untested.
 - **Size and memory.** `node-llama-cpp` adds about 69 MB to `node_modules` (43 MB of JavaScript, 18 MB of Apple Silicon binaries, plus 94 packages in all). The model file itself is not bundled. While loaded the app uses about 1.5 GB more memory.
-- **Other.** `@electron/rebuild` runs during packaging and was harmless here, since `node-llama-cpp` ships prebuilt binaries. The packaged app only sees the pet brain if `PET_BRAIN_LOCAL=1` reaches it from outside.
+- **Other.** `@electron/rebuild` runs during packaging and was harmless here, since `node-llama-cpp` ships prebuilt binaries. The packaged app runs the pet brain by default.
 
 ## Weather mood (opt-in)
 
@@ -237,9 +238,9 @@ Off by default. In Preferences, turn on **Weather mood**, type a city, press **F
 npm test
 ```
 
-Uses `node --test`, no extra dependency. The suite passes with `PET_BRAIN_LOCAL` set and unset. The repo had no tests before this branch, so these are the app's whole suite. The Smart lines tests use a mocked model (timeout, bad output, missing file, wrong file, failed load, idle unload, a throwing worker) so they never need the 542 MB file. `scripts/measure-pet-brain.js` and `scripts/electron-model-check.js` are the checks that use the real model.
+Uses `node --test`, no extra dependency. The suite passes with `PET_BRAIN_LOCAL` unset, set to `1` and set to `0`. The repo had no tests before this branch, so these are the app's whole suite. The Smart lines tests use a mocked model (timeout, bad output, missing file, wrong file, failed load, idle unload, a throwing worker) so they never need the 542 MB file. `scripts/measure-pet-brain.js` and `scripts/electron-model-check.js` are the checks that use the real model.
 
-`test/crabFlagOff.test.js` is the flag-off regression guard. It runs `renderer/crab.js` with a seeded random generator, a fake clock and a recording canvas, hashes about 2.6 million draw calls over roughly four minutes of frames, and compares the hash with one recorded from the commit before the pet brain work (35227a8). If you change the crab's look or movement on purpose, rerun the recorder and replace the golden hash.
+`test/crabFlagOff.test.js` is the regression guard for the crab, which is what the page draws when the brain is off (`PET_BRAIN_LOCAL=0` or the Preferences switch). It runs `renderer/crab.js` with a seeded random generator, a fake clock and a recording canvas, hashes about 2.6 million draw calls over roughly four minutes of frames, and compares the hash with one recorded from the commit before the pet brain work (35227a8). If you change the crab's look or movement on purpose, rerun the recorder and replace the golden hash.
 
 ## Decisions made
 
@@ -252,7 +253,7 @@ Choices made on the owner's behalf while building this, so they can be reviewed 
 5. **Typing is an approximation.** The app has no keystroke signal and a global key hook needs Input Monitoring permission and a native module. Typing pace is the share of recent seconds with any input, so mouse activity counts too. A real source can be passed on the sample as `typing` and overrides it.
 6. **Build and error events have no source.** `stuck`, `celebrate` and `error_spotted` can only be reached by pushing an event or with the pose cycler. `controller.pushEvent()` is the hook for a future shell or editor integration.
 7. **Music is macOS and Spotify only.** It only talks to Spotify when it is already running. On Windows it reports `none`, because the only route is the Spotify Web API, which would be a network call.
-8. **Flag semantics.** `PET_BRAIN_LOCAL=1` is the gate. The Preferences switch is a soft off beneath it. With the gate closed, Preferences shows no new section, the tray menu has no new item, and the prefs window keeps its old size.
+8. **Flag semantics.** Originally `PET_BRAIN_LOCAL=1` was the gate and it was off by default. Decision 49 reverses that: the gate is open unless `PET_BRAIN_LOCAL=0`. The Preferences switch is still a soft off beneath it. With the gate closed, Preferences shows no new section, the tray menu has no new item, and the prefs window keeps its old size.
 9. **Legacy chatter goes quiet when the brain is on.** The old 25 to 45 minute idle chatter and the renderer's random idle thoughts are skipped, so the two do not double up. Battery, calendar and timer alerts, and the first-use time-of-day greeting, are unchanged.
 10. **Defaults.** 30 s startup quiet, 2 min global gap, per-reaction cooldowns in `pet/config.js`, chattiness 0.5x, 1x, 2x, an evaluation every 5 s, a 10 s minimum between pose changes, an 8 s pose hold, a 7 s bubble.
 11. **Fullscreen detection.** macOS reads `AXFullScreen` of the front window, which needs the Accessibility permission the app already uses for window titles, and treats failure as not fullscreen. Windows uses `SHQueryUserNotificationState` and is untested. No app-name list for presentation apps.
@@ -293,6 +294,11 @@ Choices made on the owner's behalf while building this, so they can be reviewed 
 46. **Packaging checked.** A packed build (`electron-builder --mac --dir`, unsigned, built into a scratch folder) contains `raincloud_v2.png`, `raincloud_v2@4x.png`, `raincloud_v2.json` and `raincloud_v2.js` inside `app.asar` and none of the v1 files, so decision 31 held and no config change was needed. The packed app was not launched in this check.
 47. **Visual check method.** The app was launched with `PET_BRAIN_LOCAL=1` and a local debug port. For each screenshot the pet was put in the state, the animation loop was frozen on the exact frame wanted, and the page was captured with a transparent background. Each capture was then compared with the sheet cell by cell. Result for all 8 captures: 0 cells that are not one flat color (so no blur and no shimmer) and 0 cells that differ from the sheet, including the mirrored `move-left`, which matches the sheet flipped with the +1 offset exactly. The cloud body is in the same columns facing either way (2 to 14 across its top rows), so there is no one pixel jump when it turns; only the speed-line trail moves, from one side of the frame to one pixel past the other. A normal screen capture of the live window was also looked at once and showed the same crisp result. The system reduce-motion setting was off on this machine, so the live follow of that setting was tested with stand-ins only.
 48. **The sheet build script was not run.** `scripts/build_raincloud_v2.py` is an unchanged copy of the supplied one. Pillow is not installed on this machine and installing it was not part of the job, so the regeneration steps in this document are untested.
+49. **The cloud is the default.** After installing and still getting the crab, the owner asked for the app to be the cloud. The gate in `pet/flag.js` is now open unless `PET_BRAIN_LOCAL=0`, which reverses the "off by default" rule from the integration brief. The kill switch is `PET_BRAIN_LOCAL=0`, and the Preferences switch stays as a soft off. The environment wins over Preferences. A saved `petBrainEnabled` that is unset counts as on. The default-off tests were rewritten, and the whole suite passes with the variable unset, `1` and `0`.
+50. **Crab-only settings are hidden while the cloud is the pet.** **Skin** and **Crab color** only change the crab, so Preferences hides them whenever the brain is on and shows them again when it is off. The personality label lost the word "crab". Personality and walk speed stay, because they also shape the cloud's movement and voice.
+51. **The pose cycler needs `PET_BRAIN_DEBUG=1`.** With the brain on for everyone, the debug tray item would have appeared in every user's menu, so it is shown only with that variable.
+52. **The crab was not deleted.** It is the picture when `PET_BRAIN_LOCAL=0` or the Preferences switch is off, and it is what comes back if the sprite sheet fails to load, and `test/crabFlagOff.test.js` guards it. Removing it entirely, with its skins and accessories, is a larger change that was not made.
+53. **The app is renamed Drizzle, with the cloud as its icon.** `productName` and the package name are Drizzle, so the bundle is `Drizzle.app` and Electron's data folder is `Drizzle`. On first start `userdata-migration.js` copies `prefs.json` from the old `Clawd` folder (a copy; nothing is deleted, and an existing file is never replaced). The installers and uninstaller use the new names and remove the old ones. The app icon (`build/icon.png`, `build/icon.ico`) and the menu bar silhouette (`renderer/tray-icon.png`, `@2x`) are the sheet's idle frame, generated by `scripts/generate-icon.js` and `scripts/generate-tray-icon.js`. Kept under the old name on purpose: the app id `dev.clawd.app` (macOS permissions and the login item are keyed on it), the signing certificate `Clawd Self-Signed`, the `Clawd-src` source folder, and the internal channel and tool names. The Windows installer changes are untested.
 
 ## Known gaps
 
@@ -302,7 +308,7 @@ Choices made on the owner's behalf while building this, so they can be reviewed 
 - If the renderer cannot show a bubble (chat open, a timer alert up, asleep), the cooldown has already been used in the main process. Rare, and the line is simply lost.
 - Weather poses show only on ambient reactions, so they appear less often than the weather changes.
 - The first-use time-of-day greeting from the crab can overlap a `greeting` or `welcome_back` bubble.
-- A packaged build needs the environment variable set from outside the app. There is no in-app way to open the gate.
+- The crab is still in the app. It comes back with `PET_BRAIN_LOCAL=0`, with the Preferences switch off, or if the sprite sheet fails to load. Its code, skins and accessories have not been deleted.
 - Smart lines: the model has to be put in place by hand (no download), the first line after launch or an idle unload is a built-in line, and about 1.5 GB of memory is used while it is loaded.
 - Smart lines quality: guard-passing lines can still be odd (about 29 percent of a 48-line manual sample), and the package's own blind comparison found the built-in bank wins. The guards check rules, not wit.
 - Three failures in a row switch the model off for that session's brain. A failure here is a timeout, a thrown error or an invalid line. Toggling Smart lines or pressing Reset line history starts it fresh.
